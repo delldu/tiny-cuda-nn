@@ -3,24 +3,28 @@
 ***
 ***	Copyright 2023 Dell Du(18588220928@163.com), All Rights Reserved.
 ***
-***	File Author: Dell, 2023年 01月 19日 星期四 23:02:19 CST
+***	File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
-
-
 
 #include <stdio.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <stdlib.h>
 
+#include <iostream>
+using namespace std;
+
+#include "include/mesh_camera.h"
+#include "include/mesh_image.h"
+
 #define DEFAULT_OUTPUT "output"
 
 void eval_help(char *cmd)
 {
 	printf("Usage: %s [option]\n", cmd);
-	printf("    -h, --help                   Display this help.\n");
-	printf("    -i, --input           Input directory (including image/depth/camaera files).\n");
+	printf("    -h, --help            Display this help.\n");
+	printf("    -i, --input           Input directory (including image/depth/camera files).\n");
 	printf("    -o, --output          Output directory, default: %s.\n", DEFAULT_OUTPUT);
 
 	exit(1);
@@ -60,6 +64,14 @@ int eval_main(int argc, char **argv)
 	}
 
 	// MS -- Modify Section ?
+
+	Camera camera;
+	camera.dump();
+
+	std::vector<string> files = load_files("/tmp", ".txt");
+	for (size_t i = 0; i < files.size(); i++) {
+		std::cout << files[i] << std::endl;
+	}
 
 	return 0;
 }

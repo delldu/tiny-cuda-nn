@@ -29,10 +29,10 @@ LIBRARIES := \
  	-lrt -ldl -lpthread -lm
 
 SOURCE := main.cpp \
-	src/camera.cu \
-	src/image.cu \
-	src/point.cu \
-
+	src/mesh_camera.cu \
+	src/mesh_image.cu \
+	src/mesh_point.cu \
+	../dependencies/stbi/stbi_wrapper.cpp
 
 APPLETS := $(shell ./makebox --source)
 SOURCE += $(APPLETS)

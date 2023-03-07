@@ -1,6 +1,8 @@
 /************************************************************************************
 ***
-***	File Author: Dell, 2023年 01月 19日 星期四 23:02:19 CST
+***	Copyright 2023 Dell Du(18588220928@163.com), All Rights Reserved.
+***
+***	File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
 
@@ -45,7 +47,7 @@ extern void exit(int status);
 void help(char *cmd)
 {
 	int i;
-	printf("%s is a binary which combines %d applets, version: %s.\n", cmd, NUMBER_OF_APPLETS, VERSION);
+	printf("%s is a binary which has %d applets, version: %s.\n", cmd, NUMBER_OF_APPLETS, VERSION);
 	printf("Usage: %s applet-name\n", cmd);
 	printf("Support %d applets:\n", NUMBER_OF_APPLETS);
 	for (i = 0; i < NUMBER_OF_APPLETS; i++)

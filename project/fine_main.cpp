@@ -3,7 +3,7 @@
 ***
 ***	Copyright 2023 Dell Du(18588220928@163.com), All Rights Reserved.
 ***
-***	File Author: Dell, 2023年 01月 19日 星期四 23:02:19 CST
+***	File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
 
@@ -21,7 +21,7 @@ void fine_help(char *cmd)
 {
 	printf("Usage: %s [option]\n", cmd);
 	printf("    -h, --help            Display this help.\n");
-	printf("    -i, --input           Input directory (including mesh.obj/pc.ply file).\n");
+	printf("    -i, --input           Input directory (including mesh.obj and pc.ply).\n");
 	printf("    -o, --output          Output directory, default: %s.\n", DEFAULT_OUTPUT);
 
 	exit(1);
