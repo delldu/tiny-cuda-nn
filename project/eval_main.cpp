@@ -63,19 +63,5 @@ int eval_main(int argc, char **argv)
 	    }
 	}
 
-	// MS -- Modify Section ?
-
-	// Camera camera;
-	// camera.dump();
-
-	// std::vector<string> files = load_files("/tmp", ".txt");
-	// for (size_t i = 0; i < files.size(); i++) {
-	// 	std::cout << files[i] << std::endl;
-	// }
-
-	// if (has_cuda_device()) {
-	// 	get_gpu_memory();
-	// }
-
 	return 0;
 }

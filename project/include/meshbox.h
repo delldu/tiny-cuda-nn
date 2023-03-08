@@ -40,15 +40,15 @@ struct Camera {
 	void load(const string filename);
 	void dump();
 
-	Eigen::Matrix3f K;
-	Eigen::Matrix3f R;
-	Eigen::Vector3f T;
+	Matrix3f K;
+	Matrix3f R;
+	Vector3f T;
 
 	// Private
-	Eigen::Matrix3f KR;
-	Eigen::Vector3f KT;
-	Eigen::Vector3f O;
-	Eigen::Matrix3f R_K_inv; // R_inverse * K_inverse
+	Matrix3f KR;
+	Vector3f KT;
+	Vector3f O;
+	Matrix3f R_K_inv; // R_inverse * K_inverse
 };
 
 
@@ -56,13 +56,10 @@ struct Point {
 	Point(): xyzw(Vector4f::Zero()), rgba(Vector4f::Zero()) {
 	}
 
-	Eigen::Vector4f xyzw; // w == valid ? 1.0f, 0.0f
-	Eigen::Vector4f rgba;
+	Vector4f xyzw; // w == valid ? 1.0f, 0.0f
+	Vector4f rgba;
 };
 
-bool has_cuda_device();
-float get_gpu_memory();
-void save_point_cloud(const string& filename, const vector<Point>& pc);
-vector<string> load_files(const string dirname, const string extname);
+int eval_points(const string input_folder);
 
 #endif // __MESHBOX__H
