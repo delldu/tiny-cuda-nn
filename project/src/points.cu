@@ -248,7 +248,7 @@ vector<string> load_files(const string dirname, const string extname)
 
     dir = opendir(dirname.c_str());
     if (dir == NULL) {
-        throw std::runtime_error{ "Cannot open directory." };
+        throw std::runtime_error{fmt::format("Cannot open directory {}.", dirname)};
     }
 
     while ((ent = readdir(dir)) != NULL) {
@@ -304,7 +304,7 @@ void save_point_cloud(const string& filename, const vector<Point>& pc)
     fclose(fp);
 }
 
-int eval_points(const string& input_folder)
+int eval_points(char *input_folder)
 {
     size_t i, n_filenames;
     char output_folder[1024], file_name[2048];
@@ -315,14 +315,14 @@ int eval_points(const string& input_folder)
 
     {
         // Create output for saving points
-        sprintf(output_folder, "%s/point", input_folder.c_str());
+        sprintf(output_folder, "%s/point", input_folder);
         mkdir(output_folder, 0777);
     }
 
     vector<string> image_filenames;
     {
         // Loading image files
-        snprintf(file_name, sizeof(file_name), "%s/image", input_folder.c_str());
+        snprintf(file_name, sizeof(file_name), "%s/image", input_folder);
         image_filenames = load_files(file_name, ".png");
         if (image_filenames.size() < 1) {
             throw std::runtime_error{ fmt::format("NOT images under folder '{}'", input_folder) };
@@ -339,7 +339,7 @@ int eval_points(const string& input_folder)
     vector<string> camera_filenames;
     {
         // Loading camera files
-        snprintf(file_name, sizeof(file_name), "%s/camera", input_folder.c_str());
+        snprintf(file_name, sizeof(file_name), "%s/camera", input_folder);
         camera_filenames = load_files(file_name, ".txt");
         if (camera_filenames.size() < 1) {
             throw std::runtime_error{ fmt::format(
@@ -355,7 +355,7 @@ int eval_points(const string& input_folder)
     vector<string> depth_filenames;
     {
         // Loading depth files
-        snprintf(file_name, sizeof(file_name), "%s/depth", input_folder.c_str());
+        snprintf(file_name, sizeof(file_name), "%s/depth", input_folder);
         depth_filenames = load_files(file_name, ".png");
         // if depth_filnames == 0, suppose image including depth information in A channel
         if (depth_filenames.size() > 0 && depth_filenames.size() != image_filenames.size()) {

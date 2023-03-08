@@ -20,6 +20,9 @@ using namespace std;
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
 using namespace Eigen;
 
+#ifdef __cplusplus
+	extern "C" {
+#endif
 #define MIN_DEPTH 0.00001f
 #define MAX_DEPTH 16384.0f
 #define MAX_IMAGES 1024
@@ -60,6 +63,10 @@ struct Point {
 	Vector4f rgba;
 };
 
-int eval_points(const string input_folder);
+int eval_points(char *input_folder);
+
+#ifdef __cplusplus
+	}
+#endif
 
 #endif // __MESHBOX__H
