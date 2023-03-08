@@ -5,17 +5,25 @@
 ***     File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
+#ifndef __MESHBOX__H
+#define __MESHBOX__H
 
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
-#include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
-
-using namespace Eigen;
 using namespace std;
+
+#include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
+using namespace Eigen;
 
 #define MIN_DEPTH 0.00001f
 #define MAX_DEPTH 16384.0f
 #define MAX_IMAGES 1024
+#define MEGA_BYTES 1000000
 
 struct Camera {
 	Camera(): K(Matrix3f::Identity()), R(Matrix3f::Identity()), T(Vector3f::Zero()) {
@@ -56,3 +64,5 @@ bool has_cuda_device();
 float get_gpu_memory();
 void save_point_cloud(const string& filename, const vector<Point>& pc);
 vector<string> load_files(const string dirname, const string extname);
+
+#endif // __MESHBOX__H

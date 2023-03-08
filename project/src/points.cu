@@ -5,9 +5,66 @@
 ***     File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
-#include "../include/mesh_point.h"
+#include <dirent.h>
+#include <sys/stat.h> // dir
+#include <sys/types.h>
+
+#include <tiny-cuda-nn/common_device.h>
+#include <tiny-cuda-nn/config.h>
+#include <stbi/stbi_wrapper.h>
+#include <stbi/stb_image.h>
+
+using namespace tcnn;
+
 #include "../include/meshbox.h"
-#include "../include/mesh_common.h"
+
+// 1) Camera
+// 2) Image
+// 3) Points
+
+static void read_camera(const string filename, Camera& camera)
+{
+    int i, j;
+    char line[512], *p;
+    ifstream fp;
+
+    fp.open(filename.c_str(), ifstream::in);
+
+    for (i = 0; i < 3; i++) {
+        if (fp.eof())
+            break;
+
+        fp.getline(line, 512);
+        for (j = 0, p = strtok(line, " "); p; p = strtok(NULL, " "), j++) {
+            if (j >= 0 && j < 3) {
+                camera.K(i, j) = (float)atof(p);
+            } else if (j >= 3 && j < 6) {
+                camera.R(i, j - 3) = (float)atof(p);
+            } else if (j >= 6 && j < 7) {
+                camera.T(i, j - 6) = (float)atof(p);
+            } else {
+                ; // comments, skip ...
+            }
+        }
+    }
+    camera.update();
+
+    fp.close();
+}
+
+void Camera::load(const string filename) { read_camera(filename, *this); }
+
+void Camera::dump()
+{
+    std::cout << "Camera:" << std::endl;
+    std::cout << "K:" << std::endl << this->K << std::endl;
+    std::cout << "R:" << std::endl << this->R << std::endl;
+    std::cout << "T:" << std::endl << this->T << std::endl;
+    std::cout << "KR:" << std::endl << this->K * this->R << std::endl;
+    std::cout << "KT:" << std::endl << this->K * this->T << std::endl;
+    std::cout << "R_K_inv:" << std::endl << this->R_K_inv << std::endl;
+}
+
 
 __device__ float get_disparity(
     const Camera & camera1,
@@ -114,9 +171,139 @@ __global__ void fusion_point_cloud_kernel(
     }
 }
 
+float get_gpu_memory()
+{
+    size_t avail, total, used;
+    cudaMemGetInfo(&avail, &total);
+
+    used = total - avail;
+    std::cout << "GPU memory used " << (float)used / MEGA_BYTES << " M"
+                 << ", free " << (float)avail / MEGA_BYTES << " M" << std::endl;
+
+    return (float)avail / MEGA_BYTES;
+}
+
+bool has_cuda_device()
+{
+    int i, count = 0;
+
+    cudaGetDeviceCount(&count);
+    if (count == 0)
+        throw std::runtime_error{fmt::format("NO GPU Device")};
+
+    for (i = 0; i < count; i++) {
+        cudaDeviceProp prop;
+        if (cudaGetDeviceProperties(&prop, i) == cudaSuccess) {
+            if (prop.major >= 1)
+                break;
+        }
+    }
+    if (i == count)
+        throw std::runtime_error{fmt::format("NO GPU supporting CUDA")};
+
+    cudaSetDevice(i);
+    cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024 * 128);
+
+    return true;
+}
+
+
+GPUMemory<float> load_image(const std::string& filename, int& width, int& height)
+{
+    // width * height * RGBA
+    float* out = load_stbi(&width, &height, filename.c_str());
+
+    GPUMemory<float> result(width * height * 4);
+    result.copy_from_host(out);
+    free(out); // release memory of image data
+
+    return result;
+}
+
+GPUMemory<float> load_image_and_depth(const std::string& image_filename,
+    const std::string& depth_filename, int& width, int& height)
+{
+    // width * height * RGBA
+    float* image_out = load_stbi(&width, &height, image_filename.c_str());
+
+    int depth_width, depth_height;
+    float* depth_out = load_stbi(&depth_width, &depth_height, depth_filename.c_str());
+    if (width != depth_width || height != depth_height) {
+        throw std::runtime_error{fmt::format("Image {} size is not same as depth {}", 
+            image_filename, depth_filename)};
+    }
+    float *src = depth_out;
+    float *dst = image_out;
+    for (int i = 0; i < width * height; i++) {
+        if (src[3] < 0.5f) { // Image masked, depth is far ...
+            dst[3] = MAX_DEPTH;
+        } else { // The feature of depth is more near, more bright
+            dst[3] = (1.0f - src[0]) * 256.0f + (1.0f - src[1]) + (1.0f - src[2])/256.0f;
+        }
+        src += 4; dst += 4;
+    }
+    free(depth_out); // release memory of depth data
+
+    GPUMemory<float> result(width * height * 4);
+    result.copy_from_host(image_out);
+    free(image_out); // release memory of image data
+
+    return result;    
+}
+
+void save_image_as_texture(GPUMemory<float> image, int width, int height, cudaTextureObject_t texture)
+{
+    // int width, height;
+    // GPUMemory<float> image = load_image(argv[1], width, height);
+
+    // Create a cuda texture out of this image.
+    cudaResourceDesc resDesc;
+    memset(&resDesc, 0, sizeof(resDesc));
+    resDesc.resType = cudaResourceTypePitch2D;
+    resDesc.res.pitch2D.devPtr = image.data();
+    resDesc.res.pitch2D.desc = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
+    resDesc.res.pitch2D.width = width;
+    resDesc.res.pitch2D.height = height;
+    resDesc.res.pitch2D.pitchInBytes = width * 4 * sizeof(float);
+
+    cudaTextureDesc texDesc;
+    memset(&texDesc, 0, sizeof(texDesc));
+    texDesc.filterMode = cudaFilterModeLinear;
+    texDesc.normalizedCoords = true;
+    texDesc.addressMode[0] = cudaAddressModeClamp;
+    texDesc.addressMode[1] = cudaAddressModeClamp;
+    texDesc.addressMode[2] = cudaAddressModeClamp;
+
+    CUDA_CHECK_THROW(cudaCreateTextureObject(&texture, &resDesc, &texDesc, nullptr));
+}
+
+vector<string> load_files(const string dirname, const string extname)
+{
+    DIR* dir;
+    struct dirent* ent;
+    std::vector<string> files;
+
+    dir = opendir(dirname.c_str());
+    if (dir == NULL) {
+        throw std::runtime_error{"Cannot open directory."};
+    }
+
+    while ((ent = readdir(dir)) != NULL) {
+        char* name = ent->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+
+        if (strstr(name, extname.c_str()))
+            files.push_back(dirname + "/" + string(name));
+    }
+    closedir(dir);
+
+    return files;
+}
+
 void save_point_cloud(const string& filename, const vector<Point>& pc)
 {
-    tlog::info() << "Save " << pc.size() << " points to " << filename << " ...";
+    std::cout << "Save " << pc.size() << " points to " << filename << " ..." << std::endl;
 
     FILE *fp = fopen(filename.c_str(), "wb");
 
@@ -257,11 +444,12 @@ int run_fusibile(char* input_folder)
         for (i = 0; i < n_filenames; i++) {
             if (depth_filenames.size() == 0) {
                 GPUMemory<float> image = load_image(image_filenames[i], width, height);
-                save_image_as_texture(image, width, height, image_textures[i]);
+                // xxxx8888
+                // save_image_as_texture(image, width, height, image_textures[i]);
             } else {
                 GPUMemory<float> image = load_image_and_depth(image_filenames[i],
                     depth_filenames[i], width, height);
-                save_image_as_texture(image, width, height, image_textures[i]);
+                // save_image_as_texture(image, width, height, image_textures[i]);
             }
         }
     }
@@ -278,20 +466,20 @@ int run_fusibile(char* input_folder)
                 div_round_up((unsigned int)image_size.x(), threads.x),
                 div_round_up((unsigned int)image_size.y(), threads.y),
                 1 };
-
-            fusion_point_cloud_kernel<<<blocks, threads, 0, nullptr>>>(
-                i, image_size,
-                image_textures,
-                n_filenames,
-                gpu_cameras->data(),
-                one_image_gpu_points->data()
-            );
+            // xxxx8888
+            // fusion_point_cloud_kernel<<<blocks, threads, 0, nullptr>>>(
+            //     i, image_size,
+            //     image_textures,
+            //     n_filenames,
+            //     gpu_cameras->data(),
+            //     one_image_gpu_points->data()
+            // );
 
             one_image_gpu_points.copy_to_host(one_image_cpu_points);
             // save valid points to all_cpu_points
             for (size_t j = 0; j < one_image_cpu_points.size(); j++) {
                 Point pc = one_image_cpu_points[j];
-                if (pc.xyzw.w > 0.5f) {
+                if (pc.xyzw.w() > 0.5f) {
                     all_cpu_points.push_back(pc);
                 }
             }

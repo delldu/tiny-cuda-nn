@@ -15,9 +15,7 @@ INCLUDES  := \
 	-I include \
 	-I${CUDA_INSTALL_DIR}/include \
 	-I${TCNN_INSTALL_DIR}/include \
-	-I${TCNN_INSTALL_DIR}/dependencies \
-	-I${TCNN_INSTALL_DIR}/dependencies/cutlass/include \
-	-I${TCNN_INSTALL_DIR}/dependencies/cutlass/tools/util/include \
+ 	-I${TCNN_INSTALL_DIR}/dependencies \
 	-I${TCNN_INSTALL_DIR}/dependencies/fmt/include \
 	-I${TCNN_INSTALL_DIR}/dependencies/eigen
 
@@ -28,12 +26,10 @@ LIBRARIES := \
  	-L${CUDA_INSTALL_DIR}/lib64 -lcudart_static -lcuda \
  	-lrt -ldl -lpthread -lm
 
+
 SOURCE := main.cpp \
-	src/mesh_common.cu \
-	src/mesh_camera.cu \
-	src/mesh_image.cu \
-	src/mesh_point.cu \
-	../dependencies/stbi/stbi_wrapper.cpp
+	../dependencies/stbi/stbi_wrapper.cpp \
+	src/points.cu
 
 APPLETS := $(shell ./makebox --source)
 SOURCE += $(APPLETS)

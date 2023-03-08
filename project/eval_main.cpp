@@ -12,11 +12,9 @@
 #include <getopt.h>
 #include <stdlib.h>
 
-#include <iostream>
-using namespace std;
+// #include <iostream>
+// using namespace std;
 
-#include "include/mesh_camera.h"
-#include "include/mesh_image.h"
 #include "include/meshbox.h"
 
 
@@ -67,17 +65,17 @@ int eval_main(int argc, char **argv)
 
 	// MS -- Modify Section ?
 
-	Camera camera;
-	camera.dump();
+	// Camera camera;
+	// camera.dump();
 
-	std::vector<string> files = load_files("/tmp", ".txt");
-	for (size_t i = 0; i < files.size(); i++) {
-		std::cout << files[i] << std::endl;
-	}
+	// std::vector<string> files = load_files("/tmp", ".txt");
+	// for (size_t i = 0; i < files.size(); i++) {
+	// 	std::cout << files[i] << std::endl;
+	// }
 
-	if (has_cuda_device()) {
-		get_gpu_memory();
-	}
+	// if (has_cuda_device()) {
+	// 	get_gpu_memory();
+	// }
 
 	return 0;
 }
