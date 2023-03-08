@@ -5,10 +5,9 @@
 ***     File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
-#pragma once
+// #pragma once
 
-#include <string>
-#include <vector>
-using namespace std;
+// #include <string>
+// #include <vector>
+// using namespace std;
 
-std::vector<string> load_files(const string dirname, const string extname);

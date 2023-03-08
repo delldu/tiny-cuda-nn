@@ -17,6 +17,8 @@ using namespace std;
 
 #include "include/mesh_camera.h"
 #include "include/mesh_image.h"
+#include "include/meshbox.h"
+
 
 #define DEFAULT_OUTPUT "output"
 
@@ -71,6 +73,10 @@ int eval_main(int argc, char **argv)
 	std::vector<string> files = load_files("/tmp", ".txt");
 	for (size_t i = 0; i < files.size(); i++) {
 		std::cout << files[i] << std::endl;
+	}
+
+	if (has_cuda_device()) {
+		get_gpu_memory();
 	}
 
 	return 0;

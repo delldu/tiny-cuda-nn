@@ -5,7 +5,11 @@
 ***     File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
-#pragma once
+// #pragma once
 
-#include "mesh_common.h"
+// #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
+// using namespace Eigen;
+
+// #include <string>
+// using namespace std;
 

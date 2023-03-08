@@ -5,7 +5,7 @@
 ***     File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
 ***
 ************************************************************************************/
-#include "../include/mesh_camera.h"
+#include "../include/meshbox.h"
 #include "../include/mesh_common.h"
 
 static void read_camera(const string filename, Camera& camera)
@@ -33,7 +33,7 @@ static void read_camera(const string filename, Camera& camera)
             }
         }
     }
-    camera.R_K_inv = camera.R.inverse() * camera.K.inverse();
+    camera.update();
 
     fp.close();
 }

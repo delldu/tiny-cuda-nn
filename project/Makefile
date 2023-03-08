@@ -29,6 +29,7 @@ LIBRARIES := \
  	-lrt -ldl -lpthread -lm
 
 SOURCE := main.cpp \
+	src/mesh_common.cu \
 	src/mesh_camera.cu \
 	src/mesh_image.cu \
 	src/mesh_point.cu \

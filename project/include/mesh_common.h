@@ -30,3 +30,8 @@ using precision_t = network_precision_t;
 
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
 using namespace Eigen;
+
+#include <dirent.h>
+#include <iostream>
+#include <sys/stat.h> // dir
+#include <sys/types.h>
