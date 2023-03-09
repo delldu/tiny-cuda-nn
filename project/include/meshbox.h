@@ -8,6 +8,7 @@
 #ifndef __MESHBOX__H
 #define __MESHBOX__H
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+
 using namespace std;
 
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
@@ -37,7 +39,8 @@ struct Camera {
 	void update() {
 		KR = K * R;
 		KT = K * T;
-		O = K *R * T;
+		O = K * R * T;
+		FWD_norm = KR.col(2).normalized();
 		R_K_inv = R.inverse() * K.inverse();
 	}
 
@@ -48,11 +51,20 @@ struct Camera {
 	Matrix3f R;
 	Vector3f T;
 
-	// Private
+	// private for past
 	Matrix3f KR;
 	Vector3f KT;
 	Vector3f O;
+	Vector3f FWD_norm; // Forward normal
 	Matrix3f R_K_inv; // R_inverse * K_inverse
+};
+
+struct Ray {
+	Ray(): o(Vector3f::Zero()), d(Vector3f::Zero()) {
+	}
+
+	Eigen::Vector3f o;
+	Eigen::Vector3f d;
 };
 
 struct Point {
@@ -61,7 +73,6 @@ struct Point {
 	Vector4f xyzw; // w == valid ? 1.0f, 0.0f
 	Vector4f rgba;
 };
-
 
 int eval_points(char *input_folder);
 

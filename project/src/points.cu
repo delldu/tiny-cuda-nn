@@ -73,20 +73,35 @@ __device__ float get_disparity(
 }
 
 __device__ void image_to_world(const float u, const float v, const float depth,
-    const Camera camera, Vector3f* __restrict__ xyz)
+    const Camera& camera, Vector3f* __restrict__ xyz)
 {
     Vector3f pt
         = Vector3f{ depth * u - camera.KT.x(), depth * v - camera.KT.y(), depth - camera.KT.z() };
     *xyz = camera.R_K_inv * pt;
 }
 
-__device__ void world_to_image(const Vector3f xyz, const Camera camera,
+__device__ void world_to_image(const Vector3f xyz, const Camera& camera,
     float* __restrict__ u, float* __restrict__ v)
 {
     Vector3f temp = camera.K * camera.R * xyz + camera.K * camera.T;
     // // depth = temp.z();
     *u = temp.x() / (temp.z() + 1e-10);
     *v = temp.y() / (temp.z() + 1e-10);
+}
+
+__host__ __device__ Ray uv_to_ray(const float u, const float v, const uint32_t width, const uint32_t height,
+    const Camera &camera)
+{
+    Ray ray;
+
+    ray.o = camera.O;
+    ray.d = Vector3f {
+        (u - (float)width/2.0f) / camera.K(0, 0), // focal_length_x
+        (v - (float)height/2.0f) / camera.K(1,1), // focal_length_y,
+        1.0f
+    }.normalized();
+
+    return ray;
 }
 
 static void read_camera(const string filename, Camera& camera)
@@ -136,21 +151,17 @@ void Camera::dump()
 // 2) Image
 void depth_rgb(float depth, uint8_t *R, uint8_t *G, uint8_t *B)
 {
-    if (depth < MIN_DEPTH)
-        depth = MIN_DEPTH;
-    if (depth > MAX_DEPTH)
-        depth = MAX_DEPTH;
-
-    uint32_t rgb = (uint32_t)((MAX_DEPTH - depth) * 256.0f);
+    uint32_t rgb = (uint32_t)(depth * 1000.0f);
     *R = (rgb & 0xff0000) >> 16;
     *G = (rgb & 0x00ff00) >> 8;
     *B = (rgb & 0xff);
 }
 
+
 void rgb_depth(uint8_t R, uint8_t G, uint8_t B, float *depth)
 {
     uint32_t rgb = (R << 16) | (G << 8) | (B);
-    *depth = MAX_DEPTH - (float)rgb / 256.0f;
+    *depth = (float)rgb / 1000.0f;
 }
 
 /************************************************************************************/
@@ -265,7 +276,7 @@ __global__ void fusion_point_kernel(
     }
         
 
-    if (count >= 3) {
+    if (count >= 0) { // xxxx8888
         // Average normals and points
         float fc = (float)count + 1.0f;
         sum_xyz = Vector3f{ sum_xyz.x() / fc, sum_xyz.y() / fc, sum_xyz.z() / fc };
@@ -315,12 +326,12 @@ vector<string> load_files(const string dirname, const string extname)
     return files;
 }
 
-void save_point_cloud(const string& filename, const vector<Point>& pc)
+void save_point_cloud(const string& filename, const vector<Point> &pc)
 {
     uint32_t n_pc = pc.size();
     if (n_pc >= 1*1024*1024) {
         n_pc = 1*1024*1024;
-        // std::random_shuffle(pc.begin(), pc.end());
+        // std::shuffle(pc.begin(), pc.end());
     }
 
     cout << "Save " << n_pc << "/" << pc.size() << " points to " << filename << " ..." << endl;
@@ -423,7 +434,7 @@ int eval_points(char *input_folder)
         sort(depth_filenames.begin(), depth_filenames.end());
     }
 
-    // n_filenames = 10; // xxxx8888
+    n_filenames = 2; // xxxx8888
     uint32_t image_width, image_height;
     {
         // image/depth files have same size ?
@@ -571,6 +582,7 @@ int eval_points(char *input_folder)
         // one_image_cpu_points.clear();
     }
     CUDA_CHECK_THROW(cudaDeviceSynchronize());
+    std::random_shuffle(all_cpu_points.begin(), all_cpu_points.end());
 
     snprintf(file_name, sizeof(file_name), "%s/pc.ply", output_folder);
     save_point_cloud(file_name, all_cpu_points);
