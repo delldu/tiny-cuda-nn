@@ -16,13 +16,14 @@
 using namespace tcnn;
 
 #include "../include/meshbox.h"
+#include "tinylogger.h"
 
 // 0) Device
 // 1) Camera
 // 2) Image
 // 3) Points
 
-// 0) Camera
+// 0) Device
 /************************************************************************************/
 void dump_gpu_memory()
 {
@@ -52,6 +53,7 @@ bool has_cuda_device()
     if (i == count)
         throw std::runtime_error{ fmt::format("NO GPU supporting CUDA") };
 
+    std::cout << "Running on GPU " << i << " ... " << std::endl;
     cudaSetDevice(i);
     cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024 * 128);
 
@@ -71,17 +73,18 @@ __device__ float get_disparity(
 }
 
 __device__ void image_to_world(const float u, const float v, const float depth,
-    const Camera& camera, Vector3f* __restrict__ xyz)
+    const Camera camera, Vector3f* __restrict__ xyz)
 {
     Vector3f pt
         = Vector3f{ depth * u - camera.KT.x(), depth * v - camera.KT.y(), depth - camera.KT.z() };
     *xyz = camera.R_K_inv * pt;
 }
 
-__device__ void world_to_image(const Vector3f& xyz, const Camera& camera, float* u, float* v)
+__device__ void world_to_image(const Vector3f xyz, const Camera camera,
+    float* __restrict__ u, float* __restrict__ v)
 {
     Vector3f temp = camera.K * camera.R * xyz + camera.K * camera.T;
-    // *depth = temp.z();
+    // // depth = temp.z();
     *u = temp.x() / (temp.z() + 1e-10);
     *v = temp.y() / (temp.z() + 1e-10);
 }
@@ -124,6 +127,7 @@ void Camera::dump()
     cout << "K:" << endl << this->K << endl;
     cout << "R:" << endl << this->R << endl;
     cout << "T:" << endl << this->T << endl;
+    cout << "O:" << endl << this->O << endl;
     cout << "KR:" << endl << this->K * this->R << endl;
     cout << "KT:" << endl << this->K * this->T << endl;
     cout << "R_K_inv:" << endl << this->R_K_inv << endl;
@@ -167,51 +171,65 @@ float* load_image_and_depth(
 
 // 3) Point
 /************************************************************************************/
-__global__ void fusion_point_kernel(const uint32_t image_k, const Vector2i& image_size,
-    const cudaTextureObject_t* __restrict__ image_textures, const uint32_t n_cameras,
-    const Camera* __restrict__ gpu_cameras, Point* __restrict__ one_image_gpu_points)
+__global__ void fusion_point_kernel(
+    const uint32_t n_images, 
+    const uint32_t image_k,
+    const uint32_t image_width,
+    const uint32_t image_height,
+    // const cudaTextureObject_t* __restrict__ gpu_textures, 
+    // const Camera* __restrict__ gpu_cameras,
+    // Point* __restrict__ one_image_gpu_points)
+    cudaTextureObject_t* gpu_textures, 
+    Camera* gpu_cameras,
+    Point* one_image_gpu_points)
 {
     uint32_t x = threadIdx.x + blockDim.x * blockIdx.x;
     uint32_t y = threadIdx.y + blockDim.y * blockIdx.y;
 
-    if (x >= image_size.x() || y >= image_size.y())
+    if (x >= image_width || y >= image_height)
         return;
 
-    const uint32_t center = y * image_size.x() + x;
-    float4 sum_rgba = tex2D<float4>(image_textures[image_k], x + 0.5f, y + 0.5f);
+    const uint32_t center = y * image_width + x;
+    float4 sum_rgba = tex2D<float4>(gpu_textures[image_k], x + 0.5f, y + 0.5f);
+
+    if (x % 100 == 0 && y % 100 == 0) {
+        printf("image_k = %d, x = %d, y = %d, image_size = (%d, %d), n_images = %d, rgba: (%.4f, %.4f. %.4f. %.4f)\n", 
+            image_k, x, y, image_width, image_height, n_images, sum_rgba.x, sum_rgba.y, sum_rgba.z, sum_rgba.w);
+    }
+
     float depth = sum_rgba.w;
     if (depth < MIN_DEPTH || depth >= MAX_DEPTH)
         return;
 
+#if 1
     Vector3f xyz;
     image_to_world((float)x, (float)y, depth, gpu_cameras[image_k], &xyz);
-
     int count = 0;
     Vector3f sum_xyz = xyz;
-    for (uint32_t i = 0; i < n_cameras && count < 6; i++) {
-        if (i == image_k)
+    for (uint32_t image_i = 0; image_i < n_images && count < 6; image_i++) {
+        if (image_i == image_k)
             continue;
 
         // Project 3d point xyz on camera i
         float i_u, i_v;
-        world_to_image(xyz, gpu_cameras[i], &i_u, &i_v);
+        world_to_image(xyz, gpu_cameras[image_i], &i_u, &i_v);
 
         // Boundary check
-        if ((int)i_u < 0 || (int)i_u >= image_size.x() || (int)i_v < 0
-            || (int)i_v >= image_size.y())
+        if ((int)i_u < 0 || (int)i_u >= image_width || (int)i_v < 0
+            || (int)i_v >= image_height)
             continue;
 
-        float4 i_rgba = tex2D<float4>(image_textures[i], i_u + 0.5f, i_v + 0.5f);
+        float4 i_rgba = tex2D<float4>(gpu_textures[image_i], i_u + 0.5f, i_v + 0.5f);
         if (i_rgba.w < MIN_DEPTH || i_rgba.w > MAX_DEPTH)
             continue;
 
-        float depth_disp = get_disparity(gpu_cameras[image_k], gpu_cameras[i], depth, i_rgba.w);
+        float depth_disp = get_disparity(gpu_cameras[image_k], gpu_cameras[image_i], depth, i_rgba.w);
 
-        // check on depth
+        // check on depth disparity
         if (fabsf(depth_disp) < 0.25f) {
             // depth_threshold == 0.25
             Vector3f i_xyz; // 3d point of consistent point on other view
-            image_to_world(i_v, i_u, i_rgba.w, gpu_cameras[i], &i_xyz);
+            image_to_world(i_v, i_u, i_rgba.w, gpu_cameras[image_i], &i_xyz);
 
             sum_xyz = Vector3f{ sum_xyz.x() + i_xyz.x(), sum_xyz.y() + i_xyz.y(),
                 sum_xyz.z() + i_xyz.z() };
@@ -223,6 +241,7 @@ __global__ void fusion_point_kernel(const uint32_t image_k, const Vector2i& imag
             count++;
         }
     }
+        
 
     if (count >= 3) {
         // Average normals and points
@@ -237,7 +256,18 @@ __global__ void fusion_point_kernel(const uint32_t image_k, const Vector2i& imag
             = Vector4f{ sum_xyz.x(), sum_xyz.y(), sum_xyz.z(), 1.0f }; // mark w == 1.0f
         one_image_gpu_points[center].rgba
             = Vector4f{ sum_rgba.x, sum_rgba.y, sum_rgba.z, sum_rgba.w };
+
+        // one_image_gpu_points[center].xyzw.x() = sum_xyz.x();
+        // one_image_gpu_points[center].xyzw.y() = sum_xyz.y();
+        // one_image_gpu_points[center].xyzw.z() = sum_xyz.z();
+        // one_image_gpu_points[center].xyzw.w() = 1.0f;
+
+        // one_image_gpu_points[center].rgba.x() = sum_rgba.x;
+        // one_image_gpu_points[center].rgba.y() = sum_rgba.y;
+        // one_image_gpu_points[center].rgba.z() = sum_rgba.z;
+        // one_image_gpu_points[center].rgba.w() = sum_rgba.w;
     }
+#endif
 }
 
 vector<string> load_files(const string dirname, const string extname)
@@ -308,11 +338,12 @@ int eval_points(char *input_folder)
 {
     size_t i, n_filenames;
     char output_folder[1024], file_name[2048];
+    // cudaStream_t fusion_stream;
 
     if (has_cuda_device()) {
         dump_gpu_memory();
     }
-
+    // CUDA_CHECK_THROW(cudaStreamCreate(&fusion_stream));
     {
         // Create output for saving points
         sprintf(output_folder, "%s/point", input_folder);
@@ -358,14 +389,15 @@ int eval_points(char *input_folder)
         snprintf(file_name, sizeof(file_name), "%s/depth", input_folder);
         depth_filenames = load_files(file_name, ".png");
         // if depth_filnames == 0, suppose image including depth information in A channel
-        if (depth_filenames.size() > 0 && depth_filenames.size() != image_filenames.size()) {
+        if (depth_filenames.size() > 0 && depth_filenames.size() != n_filenames) {
             throw std::runtime_error{ fmt::format(
                 "image/depth files DOES NOT match under folder '{}'", input_folder) };
         }
         sort(depth_filenames.begin(), depth_filenames.end());
     }
 
-    Vector2i image_size;
+    n_filenames = 10; // xxxx8888
+    uint32_t image_width, image_height;
     {
         // image/depth files have same size ?
         int x, y, n, ok;
@@ -374,18 +406,18 @@ int eval_points(char *input_folder)
             throw std::runtime_error{ fmt::format(
                 "image '{}' pixel size is not valid", image_filenames[0]) };
         }
-        image_size.x() = x;
-        image_size.y() = y;
-        for (i = 1; i < image_filenames.size(); i++) {
+        image_width = x;
+        image_height = y;
+        for (i = 1; i < n_filenames; i++) {
             ok = stbi_info(image_filenames[i].c_str(), &x, &y, &n);
-            if (ok != 1 || x != image_size.x() || y != image_size.y()) {
+            if (ok != 1 || x != image_width || y != image_height) {
                 throw std::runtime_error{ fmt::format(
                     "image pixel size IS NOT same under '{}'", input_folder) };
             }
         }
-        for (i = 0; i < depth_filenames.size(); i++) {
+        for (i = 0; i < n_filenames; i++) {
             ok = stbi_info(depth_filenames[i].c_str(), &x, &y, &n);
-            if (ok != 1 || x != image_size.x() || y != image_size.y()) {
+            if (ok != 1 || x != image_width || y != image_height) {
                 throw std::runtime_error{ fmt::format(
                     "image/depth pixel size IS NOT same under '{}'", input_folder) };
             }
@@ -395,72 +427,122 @@ int eval_points(char *input_folder)
     GPUMemory<Camera> gpu_cameras(n_filenames);
     {
         // Loading cameras ...
+        auto load_camera_logger = tlog::Logger("Loading cameras ...");
+        auto progress = load_camera_logger.progress(n_filenames);
+
         vector<Camera> cpu_cameras(n_filenames);
         for (i = 0; i < n_filenames; i++) {
-            Camera camera;
-            camera.load(camera_filenames[i]);
-            cpu_cameras.push_back(camera);
+            progress.update(i);
+            cpu_cameras[i].load(camera_filenames[i]);
+            // cpu_cameras[i].dump();
         }
         gpu_cameras.copy_from_host(cpu_cameras);
         cpu_cameras.clear();
+
+        load_camera_logger.success("OK !");
     }
 
-    cudaTextureObject_t image_textures[MAX_IMAGES];
+    // float* d_A;
+    // cudaMalloc(&d_A, size);
+    // // Copy vectors from host memory to device memory
+    // cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
+
+    cudaTextureObject_t *gpu_textures;
+    CUDA_CHECK_THROW(cudaMalloc(&gpu_textures, n_filenames * sizeof(cudaTextureObject_t)));
+    cudaTextureObject_t cpu_textures[MAX_IMAGES];
+
     {
         // Loading image/depth and save to textures
         int width, height;
         float* image_data;
 
+        auto load_texture_logger = tlog::Logger("Loading texture ...");
+        auto progress = load_texture_logger.progress(n_filenames);
+
         for (i = 0; i < n_filenames; i++) {
+            progress.update(i);
+
             if (depth_filenames.size() == 0) {
                 image_data = load_image(image_filenames[i], width, height);
             } else {
                 image_data
                     = load_image_and_depth(image_filenames[i], depth_filenames[i], width, height);
             }
-            GPUMemory<float> gpu_image_data(width * height * 4);
-            gpu_image_data.copy_from_host(image_data);
+
+            cudaArray* cuArray;
+            cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
+            CUDA_CHECK_THROW(cudaMallocArray(&cuArray, &channelDesc, width, height));
+            CUDA_CHECK_THROW(cudaMemcpy2DToArray(cuArray /*dst*/, 0 /*wOffset*/, 0 /*hOffset*/,
+                image_data /*src*/, width * sizeof(float4) /*spitch bytes*/, 
+                width * sizeof(float4) /*width bytes*/, height /*rows*/, cudaMemcpyHostToDevice));
+            CUDA_CHECK_THROW(cudaDeviceSynchronize());
             free(image_data); // release memory of image data
 
-            // Create a cuda texture out of this image.
-            cudaResourceDesc resDesc;
+            // Specify texture
+            struct cudaResourceDesc resDesc;
             memset(&resDesc, 0, sizeof(resDesc));
-            resDesc.resType = cudaResourceTypePitch2D;
-            resDesc.res.pitch2D.devPtr = gpu_image_data.data();
-            resDesc.res.pitch2D.desc
-                = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-            resDesc.res.pitch2D.width = width;
-            resDesc.res.pitch2D.height = height;
-            resDesc.res.pitch2D.pitchInBytes = width * 4 * sizeof(float);
+            resDesc.resType = cudaResourceTypeArray;
+            resDesc.res.array.array = cuArray;
 
-            cudaTextureDesc texDesc;
+            // Specify texture object parameters
+            struct cudaTextureDesc texDesc;
             memset(&texDesc, 0, sizeof(texDesc));
+            texDesc.addressMode[0] = cudaAddressModeWrap;
+            texDesc.addressMode[1] = cudaAddressModeWrap;
             texDesc.filterMode = cudaFilterModeLinear;
-            texDesc.normalizedCoords = true;
-            texDesc.addressMode[0] = cudaAddressModeClamp;
-            texDesc.addressMode[1] = cudaAddressModeClamp;
-            texDesc.addressMode[2] = cudaAddressModeClamp;
+            texDesc.readMode = cudaReadModeElementType;
+            texDesc.normalizedCoords = 0; // (u, v)
 
-            CUDA_CHECK_THROW(
-                cudaCreateTextureObject(&image_textures[i], &resDesc, &texDesc, nullptr));
+            // Create texture object
+            CUDA_CHECK_THROW(cudaCreateTextureObject(&(cpu_textures[i]), &resDesc, &texDesc, nullptr));
+
         }
+        CUDA_CHECK_THROW(cudaMemcpy(gpu_textures, cpu_textures, n_filenames * sizeof(cudaTextureObject_t),
+            cudaMemcpyHostToDevice));
+
+        load_texture_logger.success("OK !");
     }
+    CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+    std::cout << "--------------------------------- OK ---------------------------------- " << std::endl;
 
     vector<Point> all_cpu_points;
     {
-        vector<Point> one_image_cpu_points(image_size.x() * image_size.y());
-        GPUMemory<Point> one_image_gpu_points(image_size.x() * image_size.y());
+        dump_gpu_memory();
 
+        vector<Point> one_image_cpu_points(image_width * image_height);
+        GPUMemory<Point> one_image_gpu_points(image_width * image_height);
+
+        auto fusion_points_logger = tlog::Logger("Fusion points ...");
+        auto progress = fusion_points_logger.progress(n_filenames);
+
+        std::cout << "--------------------------------- OK 7---------------------------------- " << std::endl;
         for (i = 0; i < n_filenames; i++) {
+            progress.update(1);
+
             // process one_image_gpu_points
             const dim3 threads = { 32, 32, 1 };
-            const dim3 blocks = { div_round_up((unsigned int)image_size.x(), threads.x),
-                div_round_up((unsigned int)image_size.y(), threads.y), 1 };
+            const dim3 blocks = { div_round_up((unsigned int)image_width, threads.x),
+                div_round_up((unsigned int)image_height, threads.y), 1 };
 
-            fusion_point_kernel<<<blocks, threads, 0, nullptr>>>(i, image_size, image_textures,
-                n_filenames, gpu_cameras.data(), one_image_gpu_points.data());
+            std::cout << "--------------------------------- OK 8---------------------------------- " << std::endl;
+
+            one_image_gpu_points.memset(0);
+            fusion_point_kernel<<<blocks, threads>>>(
+                (uint32_t)n_filenames,
+                (uint32_t)i, 
+                image_width,
+                image_height, 
+                gpu_textures,
+                gpu_cameras.data(),
+                one_image_gpu_points.data()
+            );
+            CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+            std::cout << "--------------------------------- OK 9---------------------------------- " << std::endl;
 
             one_image_gpu_points.copy_to_host(one_image_cpu_points);
+            CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
             // save valid points
             for (size_t j = 0; j < one_image_cpu_points.size(); j++) {
@@ -469,13 +551,16 @@ int eval_points(char *input_folder)
                     all_cpu_points.push_back(pc);
             }
         }
-        one_image_gpu_points.free_memory();
-        one_image_cpu_points.clear();
+        fusion_points_logger.success("OK !");
+
+        // one_image_gpu_points.free_memory();
+        // one_image_cpu_points.clear();
     }
+    CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
     snprintf(file_name, sizeof(file_name), "%s/pc.ply", output_folder);
     save_point_cloud(file_name, all_cpu_points);
-    all_cpu_points.clear();
+    // all_cpu_points.clear();
 
     return 0;
 }

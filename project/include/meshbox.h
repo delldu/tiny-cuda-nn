@@ -25,7 +25,7 @@ using namespace Eigen;
 #endif
 #define MIN_DEPTH 0.00001f
 #define MAX_DEPTH 16384.0f
-#define MAX_IMAGES 1024
+#define MAX_IMAGES 512
 #define MEGA_BYTES 1000000
 
 struct Camera {
@@ -54,14 +54,13 @@ struct Camera {
 	Matrix3f R_K_inv; // R_inverse * K_inverse
 };
 
-
 struct Point {
 	Point(): xyzw(Vector4f::Zero()), rgba(Vector4f::Zero()) {
 	}
-
 	Vector4f xyzw; // w == valid ? 1.0f, 0.0f
 	Vector4f rgba;
 };
+
 
 int eval_points(char *input_folder);
 
