@@ -134,12 +134,32 @@ void Camera::dump()
 }
 
 // 2) Image
+void depth_rgb(float depth, uint8_t *R, uint8_t *G, uint8_t *B)
+{
+    if (depth < MIN_DEPTH)
+        depth = MIN_DEPTH;
+    if (depth > MAX_DEPTH)
+        depth = MAX_DEPTH;
+
+    uint32_t rgb = (uint32_t)((MAX_DEPTH - depth) * 256.0f);
+    *R = (rgb & 0xff0000) >> 16;
+    *G = (rgb & 0x00ff00) >> 8;
+    *B = (rgb & 0xff);
+}
+
+void rgb_depth(uint8_t R, uint8_t G, uint8_t B, float *depth)
+{
+    uint32_t rgb = (R << 16) | (G << 8) | (B);
+    *depth = MAX_DEPTH - (float)rgb / 256.0f;
+}
+
 /************************************************************************************/
 float* load_image(const string& filename, int& width, int& height)
 {
     // width * height * RGBA
     return load_stbi(&width, &height, filename.c_str());
 }
+
 
 float* load_image_and_depth(
     const string& image_filename, const string& depth_filename, int& width, int& height)
@@ -155,11 +175,14 @@ float* load_image_and_depth(
     }
     float* src = depth_data;
     float* dst = image_data;
+    float temp_depth;
     for (int i = 0; i < width * height; i++) {
         if (src[3] < 0.5f) { // Image masked, depth is far ...
             dst[3] = MAX_DEPTH;
         } else { // The feature of depth is more near, more bright
-            dst[3] = (1.0f - src[0]) * 256.0f + (1.0f - src[1]) + (1.0f - src[2]) / 256.0f;
+            rgb_depth((uint8_t)(src[0] * 255.0f), (uint8_t)(src[1] * 255.0f), 
+                (uint8_t)(src[2] * 255.0f), &temp_depth);
+            dst[3] = temp_depth;
         }
         src += 4;
         dst += 4;
@@ -201,7 +224,6 @@ __global__ void fusion_point_kernel(
     if (depth < MIN_DEPTH || depth >= MAX_DEPTH)
         return;
 
-#if 1
     Vector3f xyz;
     image_to_world((float)x, (float)y, depth, gpu_cameras[image_k], &xyz);
     int count = 0;
@@ -226,7 +248,7 @@ __global__ void fusion_point_kernel(
         float depth_disp = get_disparity(gpu_cameras[image_k], gpu_cameras[image_i], depth, i_rgba.w);
 
         // check on depth disparity
-        if (fabsf(depth_disp) < 0.25f) {
+        if (fabsf(depth_disp) < 0.05f) {
             // depth_threshold == 0.25
             Vector3f i_xyz; // 3d point of consistent point on other view
             image_to_world(i_v, i_u, i_rgba.w, gpu_cameras[image_i], &i_xyz);
@@ -267,7 +289,6 @@ __global__ void fusion_point_kernel(
         // one_image_gpu_points[center].rgba.z() = sum_rgba.z;
         // one_image_gpu_points[center].rgba.w() = sum_rgba.w;
     }
-#endif
 }
 
 vector<string> load_files(const string dirname, const string extname)
@@ -296,14 +317,20 @@ vector<string> load_files(const string dirname, const string extname)
 
 void save_point_cloud(const string& filename, const vector<Point>& pc)
 {
-    cout << "Save " << pc.size() << " points to " << filename << " ..." << endl;
+    uint32_t n_pc = pc.size();
+    if (n_pc >= 1*1024*1024) {
+        n_pc = 1*1024*1024;
+        // std::random_shuffle(pc.begin(), pc.end());
+    }
+
+    cout << "Save " << n_pc << "/" << pc.size() << " points to " << filename << " ..." << endl;
 
     FILE* fp = fopen(filename.c_str(), "wb");
 
     /*write header */
     fprintf(fp, "ply\n");
     fprintf(fp, "format binary_little_endian 1.0\n");
-    fprintf(fp, "element vertex %ld\n", pc.size());
+    fprintf(fp, "element vertex %d\n", n_pc);
     fprintf(fp, "property float x\n");
     fprintf(fp, "property float y\n");
     fprintf(fp, "property float z\n");
@@ -314,7 +341,7 @@ void save_point_cloud(const string& filename, const vector<Point>& pc)
 
     // write data
 #pragma omp parallel for
-    for (size_t i = 0; i < pc.size(); i++) {
+    for (size_t i = 0; i < n_pc; i++) {
         const Point& p = pc[i];
 
         const char color_r = (int)(p.rgba.x() * 255.0);
@@ -396,7 +423,7 @@ int eval_points(char *input_folder)
         sort(depth_filenames.begin(), depth_filenames.end());
     }
 
-    n_filenames = 10; // xxxx8888
+    // n_filenames = 10; // xxxx8888
     uint32_t image_width, image_height;
     {
         // image/depth files have same size ?
@@ -442,19 +469,13 @@ int eval_points(char *input_folder)
         load_camera_logger.success("OK !");
     }
 
-    // float* d_A;
-    // cudaMalloc(&d_A, size);
-    // // Copy vectors from host memory to device memory
-    // cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
-
     cudaTextureObject_t *gpu_textures;
     CUDA_CHECK_THROW(cudaMalloc(&gpu_textures, n_filenames * sizeof(cudaTextureObject_t)));
-    cudaTextureObject_t cpu_textures[MAX_IMAGES];
-
     {
         // Loading image/depth and save to textures
         int width, height;
         float* image_data;
+        cudaTextureObject_t cpu_textures[MAX_IMAGES];
 
         auto load_texture_logger = tlog::Logger("Loading texture ...");
         auto progress = load_texture_logger.progress(n_filenames);
@@ -504,8 +525,6 @@ int eval_points(char *input_folder)
     }
     CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
-    std::cout << "--------------------------------- OK ---------------------------------- " << std::endl;
-
     vector<Point> all_cpu_points;
     {
         dump_gpu_memory();
@@ -516,16 +535,13 @@ int eval_points(char *input_folder)
         auto fusion_points_logger = tlog::Logger("Fusion points ...");
         auto progress = fusion_points_logger.progress(n_filenames);
 
-        std::cout << "--------------------------------- OK 7---------------------------------- " << std::endl;
         for (i = 0; i < n_filenames; i++) {
-            progress.update(1);
+            progress.update(i);
 
             // process one_image_gpu_points
             const dim3 threads = { 32, 32, 1 };
             const dim3 blocks = { div_round_up((unsigned int)image_width, threads.x),
                 div_round_up((unsigned int)image_height, threads.y), 1 };
-
-            std::cout << "--------------------------------- OK 8---------------------------------- " << std::endl;
 
             one_image_gpu_points.memset(0);
             fusion_point_kernel<<<blocks, threads>>>(
@@ -539,15 +555,13 @@ int eval_points(char *input_folder)
             );
             CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
-            std::cout << "--------------------------------- OK 9---------------------------------- " << std::endl;
-
             one_image_gpu_points.copy_to_host(one_image_cpu_points);
             CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
             // save valid points
             for (size_t j = 0; j < one_image_cpu_points.size(); j++) {
                 Point pc = one_image_cpu_points[j];
-                if (pc.xyzw.w() > 0.5f)
+                if (pc.xyzw.w() > 0.5f && pc.rgba.w() < MAX_DEPTH)
                     all_cpu_points.push_back(pc);
             }
         }
