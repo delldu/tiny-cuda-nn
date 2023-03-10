@@ -32,15 +32,15 @@ using namespace Eigen;
 #define MEGA_BYTES 1000000
 
 struct Camera {
+	// transform matrix = K*[R | T]
 	Camera(): K(Matrix3f::Identity()), R(Matrix3f::Identity()), T(Vector3f::Zero()) {
 		update();
 	}
 
 	void update() {
 		KR = K * R;
-		KT = K * T;
-		O = K * R * T;
-		FWD_norm = KR.col(2).normalized();
+		O = K * T;
+		FWD_norm = R.col(2).normalized();
 		R_K_inv = R.inverse() * K.inverse();
 	}
 
@@ -53,7 +53,6 @@ struct Camera {
 
 	// private for past
 	Matrix3f KR;
-	Vector3f KT;
 	Vector3f O;
 	Vector3f FWD_norm; // Forward normal
 	Matrix3f R_K_inv; // R_inverse * K_inverse
