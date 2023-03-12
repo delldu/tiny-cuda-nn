@@ -42,13 +42,14 @@ struct Camera {
 		O = K * T;
 		FWD_norm = R.col(2).normalized();
 		R_K_inv = R.inverse() * K.inverse();
+		R_inv = R.inverse();
 
 		// C3
 		Matrix<float, 3, 4> P;
 		for (int r = 0; r < 3; r++) {
 			for (int c = 0; c < 3; c++)
-				P(r, c) = R(r, c);
-			P(r, 3) = T(r, 0);
+				P(r, c) = KR(r, c);
+			P(r, 3) = O(r, 0);
 		}
 		Matrix3f M1 = P(Eigen::placeholders::all, {1, 2, 3}); // x
 		Matrix3f M2 = P(Eigen::placeholders::all, {0, 2, 3}); // y
@@ -74,8 +75,9 @@ struct Camera {
 	// private for past
 	Matrix3f KR;
 	Vector3f O;
-	Vector3f FWD_norm; // Forward normal
-	Matrix3f R_K_inv; // R_inverse * K_inverse
+	Vector3f FWD_norm;// Forward normal
+	Matrix3f R_inv;// R_inverse
+	Matrix3f R_K_inv;// R_inverse * K_inverse
 	Vector3f C3;
 };
 
@@ -88,10 +90,10 @@ struct Ray {
 };
 
 struct Point {
-	Point(): xyzw(Vector4f::Zero()), rgba(Vector4f::Zero()) {
+	Point(): xyz(Vector3f::Zero()), rgba(Vector4f::Zero()) {
 	}
-	Vector4f xyzw; // w == valid ? 1.0f, 0.0f
-	Vector4f rgba;
+	Vector3f xyz;
+	Vector4f rgba;  // w == valid ? 1.0f, 0.0f
 };
 
 int eval_points(char *input_folder);

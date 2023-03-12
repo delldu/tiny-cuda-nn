@@ -18,6 +18,9 @@ using namespace tcnn;
 #include "../include/meshbox.h"
 #include "tinylogger.h"
 
+#define MAX_POINTS (5*1024*1024)
+
+
 // 0) Device
 // 1) Camera
 // 2) Image
@@ -63,14 +66,20 @@ bool has_cuda_device()
 // 1) Camera
 /************************************************************************************/
 // xxxx8888
+__device__ float l2_distance(const Vector3f &a, const Vector3f &b)
+{
+    Vector3f c = a - b;
+    return sqrtf(c.x() * c.x() + c.y() * c.y() + c.z() * c.z());
+}
+
 __device__ float get_disparity(
     const Camera& camera1, const Camera& camera2, const float depth1, const float depth2)
 {
-    Vector3f a = camera2.C3 - camera1.C3;
-    float baseline = sqrtf(a.x() * a.x() + a.y() * a.y() + a.z() * a.z());
+    float baseline = l2_distance(camera1.C3, camera2.C3);
     // camera.K(0,0) -- focal length
     // depth/baseline=focal_length/x ==> x = focal_leng * baseline/depth
-    return fabs(camera1.K(0, 0) * baseline / depth1 - camera2.K(0, 0) * baseline / depth2);
+    // return fabs(camera1.K(0, 0) * baseline / depth1 - camera2.K(0, 0) * baseline / depth2);
+    return fabs(baseline / depth1 - baseline / depth2);
 }
 
 __device__ void image_to_world(
@@ -84,7 +93,7 @@ __device__ void image_to_world(
 __device__ void world_to_image(const Vector3f xyz, const Camera& camera,
     int* __restrict__ u, int* __restrict__ v)
 {
-    Vector3f temp = camera.KR * xyz + camera.O;
+    Vector3f temp = camera.K * camera.R * xyz + camera.O;
     // depth = temp.z();
     *u = (int)(temp.x() / (temp.z() + 1.0e-10f));
     *v = (int)(temp.y() / (temp.z() + 1.0e-10f));
@@ -98,11 +107,10 @@ __host__ __device__ void uv_to_ray(
 {
     Vector3f dir = Vector3f {
         ((float)u - (float)width/2.0f) / camera.K(0, 0), // focal_length_x
-        ((float)v - (float)height/2.0f) / camera.K(1,1), // focal_length_y,
+        ((float)v - (float)height/2.0f) / camera.K(1, 1), // focal_length_y,
         1.0f
     };
     dir = camera.R * dir;
-    dir = dir.normalized();
     float cos_theta = dir.dot(camera.FWD_norm) + 1.0e-10f;
     *endpoint = camera.T + depth/cos_theta * dir; // ray.o + (depth/cos_theta) * ray.dir
 }
@@ -235,18 +243,23 @@ __global__ void fusion_point_kernel(
 
     Vector3f sum_xyz; // save ray end point (world coordinate)
     uv_to_ray(x, y, image_width, image_height, gpu_cameras[image_k], depth, &sum_xyz);
+    Vector3f k_xyz = sum_xyz;
+
+
 #if 1
-    one_image_gpu_points[center].xyzw
-        = Vector4f{ sum_xyz.x(), sum_xyz.y(), sum_xyz.z(), 1.0f }; // mark w == 1.0f
+    one_image_gpu_points[center].xyz = sum_xyz;
     one_image_gpu_points[center].rgba
-        = Vector4f{ sum_rgba.x, sum_rgba.y, sum_rgba.z, sum_rgba.w};
+        = Vector4f{ sum_rgba.x, sum_rgba.y, sum_rgba.z, 1.0f};  // mark w == 1.0f
 #else
-    Vector3f xyz;
-    image_to_world(x, y, depth, gpu_cameras[image_k], &xyz);
     int match_count = 0;
 
+    Vector3f xyz;
+    image_to_world(x, y, depth, gpu_cameras[image_k], &xyz);
+
     int i_u, i_v;
-    for (uint32_t image_i = 0; image_i < n_images && match_count < 3; image_i++) {
+    Vector3f i_xyz; // Consistent ray end point on other view
+
+    for (uint32_t image_i = 0; image_i < n_images && match_count < 6; image_i++) {
         if (image_i == image_k)
             continue;
 
@@ -259,41 +272,40 @@ __global__ void fusion_point_kernel(
         if (i_rgba.w > MAX_DEPTH)
             continue;
 
+        float point_distance = l2_distance(k_xyz, i_xyz);
         float depth_disp = get_disparity(gpu_cameras[image_k], gpu_cameras[image_i], depth, i_rgba.w);
         if (x % 100 == 0 && y % 100 == 0) {
-            printf("depth_disp = %.4f\n", depth_disp);
+            printf("depth_disp = %.4f, point_distance=%.4f\n", depth_disp, point_distance);
         }
 
         // check on depth disparity
-        if (depth_disp < 500.0f) {
+        if (depth_disp < 0.1f && point_distance < 0.1f) {
             // depth_threshold == 0.25
-            Vector3f i_xyz; // 3d point of consistent point on other view
+            printf("!!!!! \n");
+
             uv_to_ray(i_u, i_v, image_width, image_height, gpu_cameras[image_i], i_rgba.w, &i_xyz);
 
-            sum_xyz = Vector3f{ sum_xyz.x() + i_xyz.x(), sum_xyz.y() + i_xyz.y(),
-                sum_xyz.z() + i_xyz.z() };
+            sum_xyz.x() = sum_xyz.x() + i_xyz.x();
+            sum_xyz.y() = sum_xyz.y() + i_xyz.y();
+            sum_xyz.z() = sum_xyz.z() + i_xyz.z();
+
             sum_rgba.x += i_rgba.x;
             sum_rgba.y += i_rgba.y;
             sum_rgba.z += i_rgba.z;
-            sum_rgba.w += i_rgba.w;
+            // sum_rgba.w += i_rgba.w;
 
-            match_count++;
+            match_count += 1;
         }
     }
 
     if (match_count >= 0) {
         // Average normals and points
         float fc = (float)match_count + 1.0f;
-        sum_xyz = Vector3f{ sum_xyz.x() / fc, sum_xyz.y() / fc, sum_xyz.z() / fc };
-        sum_rgba.x /= fc;
-        sum_rgba.y /= fc;
-        sum_rgba.z /= fc;
-        sum_rgba.w /= fc;
 
-        one_image_gpu_points[center].xyzw
-            = Vector4f{ sum_xyz.x(), sum_xyz.y(), sum_xyz.z(), 1.0f }; // mark w == 1.0f
+        one_image_gpu_points[center].xyz
+            = Vector3f{ sum_xyz.x()/fc, sum_xyz.y()/fc, sum_xyz.z()/fc};
         one_image_gpu_points[center].rgba
-            = Vector4f{ sum_rgba.x, sum_rgba.y, sum_rgba.z, sum_rgba.w};
+            = Vector4f{ sum_rgba.x/fc, sum_rgba.y/fc, sum_rgba.z/fc, 1.0f};  // valid w == 1.0f
     } 
 #endif
 }
@@ -324,8 +336,6 @@ vector<string> load_files(const string dirname, const string extname)
 
 void save_point_cloud(const string& filename, const vector<Point> &pc)
 {
-#define MAX_POINTS (5*1024*1024)
-
     uint32_t n_pc = pc.size();
     if (n_pc >= MAX_POINTS)
         n_pc = MAX_POINTS;
@@ -357,16 +367,15 @@ void save_point_cloud(const string& filename, const vector<Point> &pc)
 
 #pragma omp critical
         {
-            fwrite(&p.xyzw.x(), sizeof(float), 1, fp);
-            fwrite(&p.xyzw.y(), sizeof(float), 1, fp);
-            fwrite(&p.xyzw.z(), sizeof(float), 1, fp);
+            fwrite(&p.xyz.x(), sizeof(float), 1, fp);
+            fwrite(&p.xyz.y(), sizeof(float), 1, fp);
+            fwrite(&p.xyz.z(), sizeof(float), 1, fp);
             fwrite(&color_r, sizeof(char), 1, fp);
             fwrite(&color_g, sizeof(char), 1, fp);
             fwrite(&color_b, sizeof(char), 1, fp);
         }
     }
     fclose(fp);
-#undef MAX_POINTS
 }
 
 int eval_points(char *input_folder)
@@ -428,7 +437,8 @@ int eval_points(char *input_folder)
         sort(depth_filenames.begin(), depth_filenames.end());
     }
 
-    n_filenames = 100; //
+    if (n_filenames >= 100)
+        n_filenames = 100; //
     uint32_t image_width, image_height;
     {
         // image/depth files have same size ?
@@ -540,7 +550,7 @@ int eval_points(char *input_folder)
             progress.update(i);
 
             // process one_image_gpu_points
-            const dim3 threads = { 32, 16, 1 };
+            const dim3 threads = { 32, 32, 1 };
             const dim3 blocks = { div_round_up((unsigned int)image_width, threads.x),
                 div_round_up((unsigned int)image_height, threads.y), 1 };
 
@@ -560,10 +570,15 @@ int eval_points(char *input_folder)
             CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
             // save valid points
+            float b = 1.5f;
             for (size_t j = 0; j < one_image_cpu_points.size(); j++) {
                 Point pc = one_image_cpu_points[j];
-                if (pc.xyzw.w() > 0.5f)
+                if (pc.xyz.minCoeff() < -b || pc.xyz.maxCoeff() > b || pc.xyz.cwiseAbs().sum() < 0.00001f)
+                    continue;
+
+                if (pc.rgba.w() > 0.5f)
                     all_cpu_points.push_back(pc);
+    
             }
         }
         fusion_points_logger.success("OK !");
