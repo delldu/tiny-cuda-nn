@@ -511,6 +511,7 @@ int eval_points(char *input_folder)
                 width * sizeof(float4) /*width bytes*/, height /*rows*/, cudaMemcpyHostToDevice));
             CUDA_CHECK_THROW(cudaDeviceSynchronize());
             free(image_float_data); // release memory of image data
+            // cudaFreeArray(cuArray);
 
             // Specify texture
             struct cudaResourceDesc resDesc;
@@ -529,6 +530,7 @@ int eval_points(char *input_folder)
 
             // Create texture object
             CUDA_CHECK_THROW(cudaCreateTextureObject(&(cpu_textures[i]), &resDesc, &texDesc, nullptr));
+            // cudaDestroyTextureObject(&(cpu_textures[i])
         }
         CUDA_CHECK_THROW(cudaMemcpy(gpu_textures, cpu_textures, n_filenames * sizeof(cudaTextureObject_t),
             cudaMemcpyHostToDevice));
