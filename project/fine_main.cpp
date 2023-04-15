@@ -14,6 +14,14 @@
 #include <getopt.h>
 #include <stdlib.h>
 
+#include <vector>
+
+using namespace std;
+
+void test_plane();
+
+
+
 #define DEFAULT_OUTPUT "output"
 
 
@@ -58,6 +66,9 @@ int fine_main(int argc, char **argv)
 			break;
 	    }
 	}
+
+	test_plane();
+
 
 	if (input_dir == NULL) {
 		fine_help(argv[0]);

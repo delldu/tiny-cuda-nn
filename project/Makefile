@@ -1,7 +1,7 @@
 INSTALL_DIR ?= /usr/local/
 
 # Location of the CUDA Toolkit
-CUDA_INSTALL_DIR ?= /usr/local/cuda-10.2
+CUDA_INSTALL_DIR ?= /usr/local/cuda-11.7
 TCNN_INSTALL_DIR ?= ..
 
 ################################################################################
@@ -29,13 +29,14 @@ LIBRARIES := \
 
 SOURCE := main.cpp \
 	../dependencies/stbi/stbi_wrapper.cpp \
-	src/points.cu
+	src/points.cu \
+	src/mesh.cpp
 
 APPLETS := $(shell ./makebox --source)
 SOURCE += $(APPLETS)
 
 ################################################################################
-TARGET_SIZE := 64
+# TARGET_SIZE := 64
 
 NVCC := $(CUDA_INSTALL_DIR)/bin/nvcc
 
