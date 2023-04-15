@@ -62,7 +62,6 @@ struct Plane {
 
     // p on plane ?
 	bool contains(const Point p, float e=EPISON) const {
-		// std::cout << "Plane contains error: " << n.dot(p - o) << std::endl;
 		return fabs(n.dot(p - o)) < e; // (p - o) _|_ n
 	}
 
@@ -111,12 +110,12 @@ public:
 };
 
 
-inline std::ostream& operator<<(std::ostream& os, const Point& point) {
-	os << "Point " << std::fixed << point.x() << ", " << point.y() << ", " << point.z();
+std::ostream& operator<<(std::ostream& os, const Point& point) {
+	os << "Point " << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
 	return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const Plane& plane) {
+std::ostream& operator<<(std::ostream& os, const Plane& plane) {
 	os << "Plane " << std::fixed;
 	os << "[o: " << plane.o.x() << ", " << plane.o.y() << ", " << plane.o.z() << "; ";
 	os << "n: " << plane.n.x() << ", " << plane.n.y() << ", " << plane.n.z() << "]";
@@ -175,7 +174,7 @@ struct BoundingBox {
 	Point max = Point::Constant(-std::numeric_limits<float>::infinity());
 };
 
-inline std::ostream& operator<<(std::ostream& os, const BoundingBox& bb) {
+std::ostream& operator<<(std::ostream& os, const BoundingBox& bb) {
 	os << "[";
 	os << "min=[" << bb.min.x() << "," << bb.min.y() << "," << bb.min.z() << "], ";
 	os << "max=[" << bb.max.x() << "," << bb.max.y() << "," << bb.max.z() << "]";
