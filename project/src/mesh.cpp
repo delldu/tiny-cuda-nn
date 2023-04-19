@@ -21,14 +21,38 @@ using namespace std;
 using namespace Eigen;
 
 #define EPISON 5.0e-4f
+#define F(t) (float)atof(t)
 
-using Vertex = Eigen::Vector3f;
+using Point = Eigen::Vector3f;
 using Normal = Eigen::Vector3f;
 using UV = Eigen::Vector2f; // uv coordinate
 using Face = std::vector<size_t>;
-using Point = Eigen::Vector3f;
 using Points = std::vector<Point>;
 
+int get_token(char* buf, char deli, int maxcnt, char* tv[])
+{
+    int n = 0;
+
+    if (!buf)
+        return 0;
+    tv[n] = buf;
+    while (*buf && (n + 1) < maxcnt) {
+        if (*buf == deli) {
+            *buf = '\0';
+            ++buf;
+            while (*buf == deli)
+                ++buf;
+            tv[++n] = buf;
+        }
+        ++buf;
+    }
+    return (n + 1);
+}
+
+bool is_command(char* s, const char* cmd)
+{
+    return strncmp(s, cmd, strlen(cmd)) == 0;
+}
 
 std::ostream& operator<<(std::ostream& os, const Point& point)
 {
@@ -93,12 +117,8 @@ struct Mesh {
     void reset()
     {
         V.clear();
-        VC.clear();
-        VN.clear();
-        VT.clear();
+        C.clear();
         F.clear();
-        FT.clear();
-        FN.clear();        
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Mesh& mesh)
@@ -106,63 +126,30 @@ struct Mesh {
         os << std::fixed;
         os << "# Vertext: " << std::fixed << mesh.V.size() << ", Face: " << mesh.F.size() << std::endl;
 
-        // Vertex Command -- v x y z or v x y z r g b
-        bool has_color = (mesh.V.size() == mesh.VC.size());
+        // v x y z or v x y z r g b
+        bool has_color = (mesh.V.size() == mesh.C.size());
         for (size_t i = 0; i < mesh.V.size(); i++) {
             os << "v " << mesh.V[i].x() << " " << mesh.V[i].y() << " " << mesh.V[i].z();
             if (has_color)
-                os <<  " " << mesh.VC[i].r << " " << mesh.VC[i].g << " " << mesh.VC[i].b;
+                os << " " << mesh.C[i].r << " " << mesh.C[i].g << " " << mesh.C[i].b;
             os << std::endl;
         }
 
-        // Vertex Normal Command -- vn x y z
-        for (Normal vn : mesh.VN) {
-            os << "vn " << vn.x() << " " << vn.y() << " " << vn.z() << std::endl;
-        }
-
-        // Vertex Texture Command -- vt u v
-        for (UV uv : mesh.VT) {
-            os << "vt " << uv.x() << " " << uv.y() << " " << std::endl;
-        }
-
-        size_t old_group = 0;
-        bool has_face_group = (mesh.FG.size() == mesh.F.size());
-        bool has_face_texture = (mesh.FT.size() == mesh.F.size());
-        bool has_face_normal = (mesh.FT.size() == mesh.F.size());
-        // All face index list start from 1
         for (size_t i = 0; i < mesh.F.size(); i++) {
-            if (has_face_group && mesh.FG[i] != old_group) { // new group start
-                os << "g " << mesh.FG[i] << std::endl;
-                old_group = mesh.FG[i];
-            }
             os << "f";
-            for (size_t j = 0; j < mesh.F[i].size(); j++) {
-                os << " " << mesh.F[i][j] + 1;
-                if (has_face_normal) {
-                    if (has_face_texture)
-                        os << "/" << mesh.FT[i][j] + 1 << "/" << mesh.FN[i][j] + 1;
-                    else
-                        os << "//" << mesh.FN[i][j] + 1;
-                } else if (has_face_texture) {
-                    os << "/" << mesh.FT[i][j] + 1;
-                }
-            }
+            for (size_t f : mesh.F[i])
+                os << " " << f + 1; // face index list start from 1 in obj format
             os << std::endl;
         }
 
         return os;
     }
 
-    bool loadOBJ(char* filename)
+    bool loadOBJ(const char* filename)
     {
-        int count, i[3];
-        float x[6];
-        char line[2048], command[2048], word[2048];
-        size_t group = 0;
-
+        int count;
+        char line[1024], *tv[8], *f_tv[8];
         Face one_face_index;
-        Face one_face_texture;
-        Face one_face_normal;
 
         FILE* fp = fopen(filename, "r");
         if (fp == NULL) {
@@ -173,83 +160,25 @@ struct Mesh {
         reset();
 
         while (fgets(line, sizeof(line), fp) != NULL) {
-            if (sscanf(line, "%s", command) != 1)
-                continue; // skip
+            count = get_token(line, ' ', 8, tv);
 
-            if (std::string(command) == "g") {
-                group++;
-                continue;
-            }
-
-            char* l = &line[strlen(command)]; // left line
-
-            if (std::string(command) == "v") {
-                count = sscanf(l, "%f %f %f %f %f %f\n", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5]);
-                if (count != 3 && count != 6)
-                    continue; // skip invalid vertex
-
-                V.push_back(Vertex { x[0], x[1], x[2] });
-                if (count == 6)
-                     VC.push_back(RGB{x[3], x[4], x[5]});
-                continue;
-            }
-
-            if (std::string(command) == "vn") {
-                count = sscanf(l, "%f %f %f\n", &x[0], &x[1], &x[2]);
-                if (count == 3) // skip invalid normals
-                    VN.push_back(Normal{x[0], x[1], x[2]});
-                continue;
-            }
-
-            if (std::string(command) == "vt") {
-                count = sscanf(l, "%f %f %f\n", &x[0], &x[1], &x[2]);
-                if (count == 2 || count == 3) // skip invalid uv coordinates
-                    VT.push_back(UV{x[0], x[1]}); // ignore vt - w
-                continue;
-            }
-
-            if (std::string(command) == "f") {
+            if (strcmp(tv[0], "v") == 0 && (count == 4 || count == 7)) {
+                V.push_back(Point { F(tv[1]), F(tv[2]), F(tv[3]) });
+                if (count == 7)
+                    C.push_back(RGB { F(tv[4]), F(tv[5]), F(tv[6]) });
+            } else if (strcmp(tv[0], "f") == 0) {
                 // f 1/1/1 2/2/2 4/4/3 3/3/4 -- face/texture/normal index
-                int offset;
                 one_face_index.clear();
-                one_face_texture.clear();
-                one_face_normal.clear();
 
-                while (sscanf(l, "%s%n", word, &offset) == 1) {
-                    l += offset;
-                    if (sscanf(word, "%d/%d/%d", &i[0], &i[1], &i[2]) == 3) {
-                        one_face_index.push_back(i[0] - 1);
-                        one_face_texture.push_back(i[1] - 1);
-                        one_face_normal.push_back(i[2] - 1);
-                    } else if (sscanf(word, "%d/%d", &i[0], &i[1]) == 2) {
-                        one_face_index.push_back(i[0] - 1);
-                        one_face_texture.push_back(i[1] - 1);
-                    } else if (sscanf(word, "%d//%d", &i[0], &i[1]) == 2) {
-                        one_face_index.push_back(i[0] - 1);
-                        one_face_normal.push_back(i[1] - 1);
-                    } else if (sscanf(word, "%d", &i[0]) == 1) {
-                        one_face_index.push_back(i[0] - 1);
-                    } else {
-                        ; // skip invalid face index ...
-                    }
+                for (int j = 1; j < count; j++) {
+                    get_token(tv[j], '/', 3, f_tv);
+                    one_face_index.push_back(atoi(f_tv[0]) - 1);
                 }
-                if (one_face_index.size() >= 3) {
+                if (one_face_index.size() >= 3)
                     F.push_back(one_face_index);
-                    FG.push_back(group);
-                }
-                if (one_face_texture.size() >= 3 && one_face_texture.size() == one_face_index.size()) {
-                    FT.push_back(one_face_texture);
-                }
-                if (one_face_normal.size() >= 3 && one_face_normal.size() == one_face_index.size()) {
-                    FN.push_back(one_face_normal);
-                }
-                continue;
             }
         }
         fclose(fp);
-
-        if (group == 0) // group command ?
-            FG.clear();
 
         return true;
     }
@@ -257,8 +186,8 @@ struct Mesh {
     bool saveOBJ(const char* filename)
     {
         ofstream out(filename);
-        if (!out.good()) {
-            std::cerr << "Error: create file '" << filename << "'" << std::endl;
+        if (! out.good()) {
+            fprintf(stderr, "Error: create OBJ file '%s' for saving ... \n", filename);
             return false;
         }
         out << *this;
@@ -266,14 +195,13 @@ struct Mesh {
         return true;
     }
 
-    bool loadPLY(char* filename)
+    bool loadPLY(const char* filename)
     {
         int count;
+        char line[2048], *tv[256];
         float x[3];
-        char line[2048], command[2048], word[2048];
-        size_t n, n_vertex, n_face;
-
-        int offset;
+        uint8_t rgb[3];
+        size_t n_vertex, n_face;
         Face one_face_index;
 
         FILE* fp = fopen(filename, "r");
@@ -282,115 +210,94 @@ struct Mesh {
             return false;
         }
 
+        reset();
+
         // parsing ply header ...
-        bool is_ply_magic = false;
+        bool has_ply_magic = false;
         bool binary_format = false;
         bool has_color = false;
 
+        n_vertex = n_face = 0;
         while (fgets(line, sizeof(line), fp) != NULL) {
-            if (sscanf(line, "%s", command) != 1)
-                continue; // skip
-            if (std::string(command) == "end_header")
+            count = get_token(line, ' ', 256, tv);
+
+            if (is_command(tv[0], "end_header"))
                 break;
 
-            if (std::string(command) == "ply")
-                is_ply_magic = true;
+            if (is_command(tv[0], "ply"))
+                has_ply_magic = true;
 
-            if (std::string(command) == "format") {
-                binary_format = (strstr(line, "binary") != NULL);
+            if (is_command(tv[0], "format"))
+                binary_format = (strstr(tv[1], "binary") != NULL);
+
+            if (is_command(tv[0], "element")) {
+                if (is_command(tv[1], "vertex"))
+                    n_vertex = atoi(tv[2]);
+                else if (is_command(tv[1], "face"))
+                    n_face = atoi(tv[2]);
             }
 
-            if (std::string(command) == "element") {
-                char* l = &line[strlen(command)]; // left line
-                count = sscanf(l, "%s %ld\n", word, &n);
-                if (count != 2)
-                    continue; // skip invalid vertex/face ?
-                if (std::string(word) == "vertex")
-                    n_vertex = n;
-                if (std::string(word) == "face")
-                    n_face = n;
-            }
-
-            if (std::string(command) == "property") {
-                if (strstr(line, "red") != NULL)
-                    has_color = true;
-            }
+            if (is_command(tv[0], "property") && is_command(tv[2], "red"))
+                has_color = true;
         }
 
-        if (! is_ply_magic) {
+        if (!has_ply_magic) {
             fprintf(stderr, "Error: %s is not ply file...", filename);
             fclose(fp);
             return false;
         }
 
         if (binary_format) {
-            // Reading vertex ...
-            for (size_t k = 0; k < n_vertex; k++) {
-                fread(&x[0], sizeof(float), 1, fp);
-                fread(&x[1], sizeof(float), 1, fp);
-                fread(&x[2], sizeof(float), 1, fp);
-                V.push_back(Vertex{x[0], x[1], x[2]});
+            // vertex ...
+            while (n_vertex > 0 && !feof(fp)) {
+                fread(x, sizeof(float), 3, fp);
+                V.push_back(Point { x[0], x[1], x[2] });
                 if (has_color) {
-                    uint8_t r, g, b;
-                    fread(&r, sizeof(uint8_t), 1, fp);
-                    fread(&g, sizeof(uint8_t), 1, fp);
-                    fread(&b, sizeof(uint8_t), 1, fp);
-                    VC.push_back(RGB{(float)r/255.0f, (float)g/255.0f, (float)b/255.0f});
+                    fread(rgb, sizeof(uint8_t), 3, fp);
+                    C.push_back(RGB { (float)rgb[0] / 255.0f, (float)rgb[1] / 255.0f, (float)rgb[2] / 255.0f });
                 }
+                n_vertex--;
             }
-            // Reading face ...
-            for (size_t k = 0; k < n_face; k++) {
+
+            // face ...
+            while (n_face > 0 && !feof(fp)) {
                 one_face_index.clear();
-                int j, f, f_n;
-                fread(&f_n, sizeof(int), 1, fp);
-                for (j = 0; j < f_n; j++) {
+                int j, f;
+                uint8_t f_n; // ply format !!!
+                fread(&f_n, sizeof(uint8_t), 1, fp);
+                for (j = 0; j < (int)f_n; j++) {
                     fread(&f, sizeof(int), 1, fp);
                     one_face_index.push_back(f);
                 }
-                if (one_face_index.size() >= 3) {
-                    F.push_back(one_face_index);
-                }
-            } // end reading face
-        } else { // ascii format
-            // Reading vertex ...
-            for (size_t k = 0; k < n_vertex; k++) {
-                if (fgets(line, sizeof(line), fp) == NULL)
-                    continue;
-
-                if (has_color) {
-                    int r, g, b;
-                    count = sscanf(line, "%f %f %f %d %d %d\n", &x[0], &x[1], &x[2], &r, &g, &b);
-                    if (count == 6) {
-                        V.push_back(Vertex{x[0], x[1], x[2]});
-                        VC.push_back(RGB{(float)r/255.0f, (float)g/255.0f, (float)b/255.0f});
-                    }
-                } else {
-                    count = sscanf(line, "%f %f %f\n", &x[0], &x[1], &x[2]);
-                    if (count == 3)
-                        V.push_back(Vertex{x[0], x[1], x[2]});
-                }
-            }  // end reading vertex
-
-            // Reading face ...
-            for (size_t k = 0; k < n_face; k++) {
-                if (fgets(line, sizeof(line), fp) == NULL)
-                    continue;
-
-                char *l = line;
-                if (sscanf(l, "%s%n", word, &offset) != 1)
-                    continue;
-                l += offset;
-
-                n = atoi(word);
-                one_face_index.clear();
-                for (size_t j = 0; j < n; j++) {
-                    if (sscanf(l, "%s%n", word, &offset) != 1)
-                        continue;
-                    l += offset;
-                    one_face_index.push_back(atoi(word));
-                }
                 if (one_face_index.size() >= 3)
                     F.push_back(one_face_index);
+                n_face--;
+            } // end reading face
+        } else { // ascii format
+            // vertex ...
+            while (n_vertex > 0 && fgets(line, sizeof(line), fp) != NULL) {
+                count = get_token(line, ' ', 8, tv);
+                if (has_color) {
+                    if (count == 7) {
+                        V.push_back(Point { F(tv[1]), F(tv[2]), F(tv[3]) });
+                        C.push_back(RGB { F(tv[4]) / 255.0f, F(tv[5]) / 255.0f, F(tv[6]) / 255.0f });
+                    }
+                } else {
+                    if (count == 4)
+                        V.push_back(Point { F(tv[1]), F(tv[2]), F(tv[3]) });
+                }
+                n_vertex--;
+            } // end reading vertex
+
+            // face ...
+            while (n_face > 0 && fgets(line, sizeof(line), fp) != NULL) {
+                count = get_token(line, ' ', 256, tv);
+                one_face_index.clear();
+                for (int j = 1; j < atoi(tv[0]); j++)
+                    one_face_index.push_back(atoi(tv[j]));
+                if (one_face_index.size() >= 3)
+                    F.push_back(one_face_index);
+                n_face--;
             } // end reading face
         }
 
@@ -413,7 +320,7 @@ struct Mesh {
         fprintf(fp, "property float x\n");
         fprintf(fp, "property float y\n");
         fprintf(fp, "property float z\n");
-        if (VC.size() == V.size()) {
+        if (C.size() == V.size()) {
             fprintf(fp, "property uchar red\n");
             fprintf(fp, "property uchar green\n");
             fprintf(fp, "property uchar blue\n");
@@ -428,15 +335,12 @@ struct Mesh {
             fwrite(&V[i].y(), sizeof(float), 1, fp);
             fwrite(&V[i].z(), sizeof(float), 1, fp);
 
-            if (VC.size() == V.size()) {
-                uint8_t r, g, b;
-                r = (uint8_t)(VC[i].r * 255.0);
-                g = (uint8_t)(VC[i].g * 255.0);
-                b = (uint8_t)(VC[i].b * 255.0);
-
-                fwrite(&r, sizeof(char), 1, fp);
-                fwrite(&g, sizeof(char), 1, fp);
-                fwrite(&b, sizeof(char), 1, fp);
+            if (C.size() == V.size()) {
+                uint8_t rgb[3];
+                rgb[0] = (uint8_t)(C[i].r * 255.0);
+                rgb[1] = (uint8_t)(C[i].g * 255.0);
+                rgb[2] = (uint8_t)(C[i].b * 255.0);
+                fwrite(rgb, sizeof(char), 3, fp);
             }
         }
 
@@ -445,8 +349,8 @@ struct Mesh {
             uint8_t n = (uint8_t)face.size();
             fwrite(&n, sizeof(uint8_t), 1, fp);
             for (size_t f : face) {
-                uint32_t index = (uint32_t)f;
-                fwrite(&index, sizeof(uint32_t), 1, fp);
+                int index = (int)f;
+                fwrite(&index, sizeof(int), 1, fp);
             }
         }
 
@@ -455,15 +359,10 @@ struct Mesh {
     }
 
 public:
-    std::vector<Vertex> V; // v x y z -- Vertex Command
-    std::vector<RGB> VC; // Vertex Color
-    std::vector<Normal> VN; // vn x y z -- Vertex Normal Command
-    std::vector<UV> VT; // vt u v [w] -- Vertex Texture Command
+    std::vector<Point> V; // v x y z -- Vertex Command
+    std::vector<RGB> C; // Vertex Color
 
-    std::vector<Face> F;    // Face Index List
-    std::vector<size_t> FG; // Face Group
-    std::vector<Face> FT;   // Face Texture Index List
-    std::vector<Face> FN;   // Face Normal Index List
+    std::vector<Face> F; // Face Index List
 };
 
 struct Plane {
@@ -485,8 +384,6 @@ struct Plane {
         float t = n.dot(p - o);
         return o + t * n;
     }
-
-    void normalized() { n = n.normalized(); }
 
     // fitting ...
     Plane(const Points points)
@@ -535,6 +432,13 @@ public:
 
 struct BoundingBox {
     BoundingBox() { }
+
+    BoundingBox(const Points V)
+    {
+        for (Point p : V)
+            update(p);
+    }
+
     BoundingBox(const Point& a, const Point& b)
         : min { a }
         , max { b }
@@ -554,6 +458,16 @@ struct BoundingBox {
     }
 
     Point diag() { return max - min; }
+
+    void voxel(size_t N)
+    {
+        radius = diag().maxCoeff() / N;
+        Eigen::Vector3f f = diag() / radius;
+        dim.x() = (int)ceilf(f.x());
+        dim.y() = (int)ceilf(f.y());
+        dim.z() = (int)ceilf(f.z());
+        radius = radius / 2.0f;
+    }
 
     Point relative_pos(const Point& pos) { return (pos - min).cwiseQuotient(diag()); }
 
@@ -588,67 +502,58 @@ struct BoundingBox {
 
     Point min = Point::Constant(std::numeric_limits<float>::infinity());
     Point max = Point::Constant(-std::numeric_limits<float>::infinity());
+
+    // Helper
+    float radius;
+    Eigen::Vector3i dim;
 };
 
 void test_plane()
 {
-    Points points;
+    // Points points;
 
-    Point p1 = Point { 0.0, 0.0, 0.0 };
-    Point p2 = Point { 1.0, 0.0, 0.0 };
-    Point p3 = Point { 0.0, 1.0, 0.0 };
-    Point p4 = Point { 0.0, 0.0, 1.0 };
+    // Point p1 = Point { 0.0, 0.0, 0.0 };
+    // Point p2 = Point { 1.0, 0.0, 0.0 };
+    // Point p3 = Point { 0.0, 2.0, 0.0 };
+    // Point p4 = Point { 0.0, 0.0, 3.0 };
 
-    points.push_back(p1);
-    points.push_back(p2);
-    points.push_back(p3);
-    // points.push_back(Eigen::Vector3f{0.01, 0.01, 0.01});
+    // points.push_back(p1);
+    // points.push_back(p2);
+    // points.push_back(p3);
+    // // points.push_back(Eigen::Vector3f{0.01, 0.01, 0.01});
 
-    Plane plane(points);
-    std::cout << plane << std::endl;
+    // Plane plane(points);
+    // std::cout << plane << std::endl;
 
-    Point p = Point { 0.000001, 0.000001, 0.000001 };
-    std::cout << p << " on plane (epision = default) ? " << plane.contains(p) << std::endl;
-    std::cout << p << " on plane (epision = 0.1f)? " << plane.contains(p, 0.1f) << std::endl;
+    // Point p = Point { 0.000001, 0.000001, 0.000001 };
+    // std::cout << p << " on plane (epision = default) ? " << plane.contains(p) << std::endl;
+    // std::cout << p << " on plane (epision = 0.1f)? " << plane.contains(p, 0.1f) << std::endl;
 
-    BoundingBox aabb;
-    aabb.update(p1);
-    aabb.update(p2);
-    aabb.update(p3);
-    aabb.update(p4);
-    std::cout << "aabb:" << aabb << std::endl;
+    // BoundingBox aabb;
+    // aabb.update(p1);
+    // aabb.update(p2);
+    // aabb.update(p3);
+    // aabb.update(p4);
+    // aabb.voxel(100);
+    // std::cout << "aabb:" << aabb << std::endl;
+    // std::cout << "aabb dim:" << aabb.dim << std::endl;
 
-    Plane B(plane.o - Point { EPISON / 2.0, EPISON / 2.0, EPISON / 2.0 },
-        plane.n + Point { EPISON / 2.0, EPISON / 2.0, EPISON / 2.0 });
+    // Plane B(plane.o - Point { EPISON / 2.0, EPISON / 2.0, EPISON / 2.0 },
+    //     plane.n + Point { EPISON / 2.0, EPISON / 2.0, EPISON / 2.0 });
 
-    std::cout << B << std::endl;
-    std::cout << "Plane is same as B ?" << plane.same(B) << std::endl;
+    // std::cout << B << std::endl;
+    // std::cout << "Plane is same as B ?" << plane.same(B) << std::endl;
 
     Mesh mesh;
-    mesh.V.push_back(p1);
-    mesh.V.push_back(p2);
-    mesh.V.push_back(p3);
-    mesh.V.push_back(p4);
+ 
+    mesh.loadOBJ("001.obj");
+    mesh.savePLY("001_test.ply");
+    mesh.saveOBJ("001_test.obj");
 
-    Face face;
-    face.push_back(0);
-    face.push_back(1);
-    face.push_back(2);
-    mesh.F.push_back(face);
+    mesh.loadPLY("pc.ply");
+    mesh.savePLY("pc_test.ply");
+    mesh.saveOBJ("pc_test.obj");
 
-    face.clear();
-    face.push_back(0);
-    face.push_back(2);
-    face.push_back(3);
-    mesh.F.push_back(face);
-
-    // mesh.loadOBJ((char *)"001.obj");
-
-    mesh.savePLY("test.ply");
-    mesh.saveOBJ("test.obj");
-
-    Material material;
-    material.save("test.mtl");
-    // std::cout << material << std::endl;
-
+    // Material material;
+    // material.save("test.mtl");
 }
