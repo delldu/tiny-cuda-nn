@@ -32,7 +32,7 @@ using namespace Eigen;
 
 
 #include "../include/meshbox.h"
-#include "tinylogger.h"
+#include "tinylog.h"
 
 #define MAX_POINTS (5*1024*1024)
 
