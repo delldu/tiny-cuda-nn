@@ -14,105 +14,66 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 using namespace std;
 
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
 using namespace Eigen;
 
 #include "tinylog.h"
-#include "nanoflann.hpp"
+// #include "nanoflann.hpp"
 
+#include "mesh.h"
 
-#define D_EPISON 1.0e-03    // distance epision
+#define D_EPISON 1.0e-03 // distance epision
 // 1.0 - math.cos(15.0 * 3.1415926/180.0) -- 0.03407
 // 1.0 - cos(10.0/180.0 * 3.1415926) -- 0.01519
-#define T_EPISON_10 0.01519f  // cosine etheta epision, cos(10.0/180.0 * 3.1415926) -- 0.9848077535291953
+#define T_EPISON_10 0.01519f // cosine etheta epision, cos(10.0/180.0 * 3.1415926) -- 0.9848077535291953
 #define T_EPISON_15 0.03407f
 
+// using Point = Eigen::Vector3f;
+// using Normal = Eigen::Vector3f;
+// using UVMap = Eigen::Vector2f;
+// using Face = std::vector<size_t>;
+// using Points = std::vector<Point>;
 
-using Point = Eigen::Vector3f;
-// struct Point {
-//     Point(float x, float y, float z): x(x), y(y), z(z) {
 
-//     }
 
-//     friend std::ostream& operator<<(std::ostream& os, const Point& point)
+// std::ostream& operator<<(std::ostream& os, const Point& point)
+// {
+//     os << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
+//     return os;
+// }
+
+// struct GridKey
+// {
+//     GridKey(uint32_t f, uint32_t s, uint32_t t) : i(f), j(s), k(t){}
+
+//     friend std::ostream& operator<<(std::ostream& os, const GridKey& key)
 //     {
-//         os << std::fixed << "(" << point.x << ", " << point.y << ", " << point.z << ")";
+//         os << std::fixed << "(" << key.i << ", " << key.j << ", " << key.k << ")";
 //         return os;
 //     }
 
-//     float x, y, z;
+//     uint32_t i, j, k;
 // };
 
+// struct HashFunc
+// {
+//     std::size_t operator()(const GridKey &key) const
+//     {
+//         return ((std::hash<uint32_t>()(key.i) ^ (std::hash<uint32_t>()(key.j) << 1)) >> 1) ^ (std::hash<uint32_t>()(key.k) << 1);
+//     }
+// };
 
-using Normal = Eigen::Vector3f;
-using UV = Eigen::Vector2f; // uv coordinate
-using Face = std::vector<size_t>;
-using Points = std::vector<Point>;
-
-
-int get_token(char* buf, char deli, int maxcnt, char* tv[])
-{
-    int n = 0;
-
-    if (!buf)
-        return 0;
-    tv[n] = buf;
-    while (*buf && (n + 1) < maxcnt) {
-        if (*buf == deli) {
-            *buf = '\0';
-            ++buf;
-            while (*buf == deli)
-                ++buf;
-            tv[++n] = buf;
-        }
-        ++buf;
-    }
-    return (n + 1);
-}
-
-bool is_command(char* s, const char* cmd)
-{
-    return strncmp(s, cmd, strlen(cmd)) == 0;
-}
-
-std::ostream& operator<<(std::ostream& os, const Point& point)
-{
-    os << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
-    return os;
-}
-
-struct GridKey
-{
-    GridKey(uint32_t f, uint32_t s, uint32_t t) : i(f), j(s), k(t){}
-
-    friend std::ostream& operator<<(std::ostream& os, const GridKey& key)
-    {
-        os << std::fixed << "(" << key.i << ", " << key.j << ", " << key.k << ")";
-        return os;
-    }
-
-    uint32_t i, j, k;
-};
-
-struct HashFunc
-{
-    std::size_t operator()(const GridKey &key) const
-    {
-        return ((std::hash<uint32_t>()(key.i) ^ (std::hash<uint32_t>()(key.j) << 1)) >> 1) ^ (std::hash<uint32_t>()(key.k) << 1);
-    }
-};
-
-struct EqualKey
-{
-    bool operator () (const GridKey &lhs, const GridKey &rhs) const {
-        return lhs.i == rhs.i && lhs.j == rhs.j && lhs.k == rhs.k;
-    }
-};
-using GridIndex = std::unordered_map<GridKey, std::vector<uint32_t>, HashFunc, EqualKey>;
+// struct EqualKey
+// {
+//     bool operator () (const GridKey &lhs, const GridKey &rhs) const {
+//         return lhs.i == rhs.i && lhs.j == rhs.j && lhs.k == rhs.k;
+//     }
+// };
+// using GridIndex = std::unordered_map<GridKey, std::vector<uint32_t>, HashFunc, EqualKey>;
 
 // struct Grid {
 //     Grid(Points V, size_t N) {
@@ -127,62 +88,60 @@ using GridIndex = std::unordered_map<GridKey, std::vector<uint32_t>, HashFunc, E
 //     GridIndex m_data;
 // };
 
+// struct Color {
+//     friend std::ostream& operator<<(std::ostream& os, const Color& color)
+//     {
+//         os << std::fixed << color.r << " " << color.g << " " << color.b;
+//         return os;
+//     }
 
+// public:
+//     float r, g, b;
+// };
+// using GridColor = std::unordered_map<GridKey, Color>;
+// using GridDensity = std::unordered_map<GridKey, float>;
 
-struct Color {
-    friend std::ostream& operator<<(std::ostream& os, const Color& color)
-    {
-        os << std::fixed << color.r << " " << color.g << " " << color.b;
-        return os;
-    }
+// struct Material {
+//     friend std::ostream& operator<<(std::ostream& os, const Material& material)
+//     {
+//         os << std::fixed;
+//         os << "newmtl " << material.name << std::endl;
+//         os << "Ns " << material.Ns << std::endl;
+//         os << "Ka " << material.Ka << std::endl;
+//         os << "Kd " << material.Kd << std::endl;
+//         os << "Ks " << material.Ks << std::endl;
+//         os << "Ke " << material.Ke << std::endl;
+//         os << "Ni " << material.Ni << std::endl;
+//         os << "d " << material.d << std::endl;
+//         os << "illum " << material.illum << std::endl;
+//         return os;
+//     }
 
-public:
-    float r, g, b;
-};
-using GridColor = std::unordered_map<GridKey, Color>;
-using GridDensity = std::unordered_map<GridKey, float>;
+//     bool save(const char* filename)
+//     {
+//         ofstream out(filename);
+//         if (!out.good()) {
+//             tlog::error() << "Create file '" << filename << "'";
+//             return false;
+//         }
+//         out << *this;
+//         out.close();
+//         return true;
+//     }
 
-struct Material {
-    friend std::ostream& operator<<(std::ostream& os, const Material& material)
-    {
-        os << std::fixed;
-        os << "newmtl " << material.name << std::endl;
-        os << "Ns " << material.Ns << std::endl;
-        os << "Ka " << material.Ka << std::endl;
-        os << "Kd " << material.Kd << std::endl;
-        os << "Ks " << material.Ks << std::endl;
-        os << "Ke " << material.Ke << std::endl;
-        os << "Ni " << material.Ni << std::endl;
-        os << "d " << material.d << std::endl;
-        os << "illum " << material.illum << std::endl;
-        return os;
-    }
+// public:
+//     std::string name = "Material"; // Texture name
 
-    bool save(const char* filename)
-    {
-        ofstream out(filename);
-        if (!out.good()) {
-            std::cerr << "Error: create file '" << filename << "'" << std::endl;
-            return false;
-        }
-        out << *this;
-        out.close();
-        return true;
-    }
+//     Color Ka { 1.0, 1.0, 1.0 }; // Ambient color
+//     Color Kd { 0.0, 0.0, 0.0 }; // Diffuse color
+//     Color Ks { 0.5, 0.5, 0.5 }; // Specular color
+//     Color Ke { 0.0, 0.0, 0.0 }; // Emit light color
 
-public:
-    std::string name = "Material"; // Texture name
-
-    Color Ka { 1.0, 1.0, 1.0 }; // Ambient color
-    Color Kd { 0.0, 0.0, 0.0 }; // Diffuse color
-    Color Ks { 0.5, 0.5, 0.5 }; // Specular color
-    Color Ke { 0.0, 0.0, 0.0 }; // Emit light color
-
-    float Ni = 1.45; // Density
-    float d = 1.0; // Transparency
-    float Ns = 250.0; // Shininess
-    int illum = 2; // Illumination model
-};
+//     float Ni = 1.45; // Density
+//     float d = 1.0; // Transparency
+//     float Ns = 250.0; // Shininess
+//     int illum = 2; // Illumination model
+// };
 
 struct Plane {
     Plane(Point o, Normal n)
@@ -194,13 +153,13 @@ struct Plane {
 
     Plane(const Point p1, const Point p2, const Point p3)
     {
-        o = (p1 + p2 + p3)/3.0f;
+        o = (p1 + p2 + p3) / 3.0f;
         n = (p2 - p1).cross(p3 - p1);
         n = n.normalized();
-    }    
+    }
 
     // p on plane ?
-    bool contains(const Point p, float e=D_EPISON) const
+    bool contains(const Point p, float e = D_EPISON) const
     {
         return fabs(n.dot(p - o)) < e; // (p - o) _|_ n
     }
@@ -214,7 +173,7 @@ struct Plane {
     float distance(const Point p)
     {
         return fabs(n.dot(p - o));
-    }    
+    }
 
     // fitting via ref_points ...
     void refine()
@@ -256,7 +215,6 @@ struct Plane {
         return os;
     }
 
-
 public:
     Point o = Vector3f::Zero(); // orignal
     Normal n = Vector3f::Ones(); // normal, should be normalized !!!
@@ -265,76 +223,74 @@ public:
     std::vector<size_t> ref_indexs;
 };
 
-struct Normals
-{
-    using coord_t = float;  //!< The type of each coordinate
+// struct Normals
+// {
+//     using coord_t = float;  //!< The type of each coordinate
 
-    // Must return the number of normals
-    inline size_t kdtree_get_point_count() const { return data.size(); }
+//     // Must return the number of normals
+//     inline size_t kdtree_get_point_count() const { return data.size(); }
 
-    // Returns the dim'th component of the idx'th point in the class:
-    // Since this is inlined and the "dim" argument is typically an immediate
-    // value, the
-    //  "if/else's" are actually solved at compile time.
-    inline float kdtree_get_pt(const size_t idx, const size_t dim) const
-    {
-        if (dim == 0)
-            return data[idx].x();
-        else if (dim == 1)
-            return data[idx].y();
-        else
-            return data[idx].z();
-    }
+//     // Returns the dim'th component of the idx'th point in the class:
+//     // Since this is inlined and the "dim" argument is typically an immediate
+//     // value, the
+//     //  "if/else's" are actually solved at compile time.
+//     inline float kdtree_get_pt(const size_t idx, const size_t dim) const
+//     {
+//         if (dim == 0)
+//             return data[idx].x();
+//         else if (dim == 1)
+//             return data[idx].y();
+//         else
+//             return data[idx].z();
+//     }
 
-    // Optional bounding-box computation: return false to default to a standard
-    // bbox computation loop.
-    //   Return true if the BBOX was already computed by the class and returned
-    //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
-    //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
-    template <class BBOX>
-    bool kdtree_get_bbox(BBOX& /* bb */) const
-    {
-        return false;
-    }
+//     // Optional bounding-box computation: return false to default to a standard
+//     // bbox computation loop.
+//     //   Return true if the BBOX was already computed by the class and returned
+//     //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
+//     //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
+//     template <class BBOX>
+//     bool kdtree_get_bbox(BBOX& /* bb */) const
+//     {
+//         return false;
+//     }
 
-public:
-    std::vector<Normal> data;
-};
+// public:
+//     std::vector<Normal> data;
+// };
 
+// struct PointCloud
+// {
+//     using coord_t = float;  //!< The type of each point
 
-struct PointCloud
-{
-    using coord_t = float;  //!< The type of each point
+//     // Must return the number of points
+//     inline size_t kdtree_get_point_count() const { return data.size(); }
 
-    // Must return the number of points
-    inline size_t kdtree_get_point_count() const { return data.size(); }
+//     //  "if/else's" are actually solved at compile time.
+//     inline float kdtree_get_pt(const size_t idx, const size_t dim) const
+//     {
+//         if (dim == 0)
+//             return data[idx].x();
+//         else if (dim == 1)
+//             return data[idx].y();
+//         else
+//             return data[idx].z();
+//     }
 
-    //  "if/else's" are actually solved at compile time.
-    inline float kdtree_get_pt(const size_t idx, const size_t dim) const
-    {
-        if (dim == 0)
-            return data[idx].x();
-        else if (dim == 1)
-            return data[idx].y();
-        else
-            return data[idx].z();
-    }
+//     // Optional bounding-box computation: return false to default to a standard
+//     // bbox computation loop.
+//     //   Return true if the BBOX was already computed by the class and returned
+//     //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
+//     //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
+//     template <class BBOX>
+//     bool kdtree_get_bbox(BBOX& /* bb */) const
+//     {
+//         return false;
+//     }
 
-    // Optional bounding-box computation: return false to default to a standard
-    // bbox computation loop.
-    //   Return true if the BBOX was already computed by the class and returned
-    //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
-    //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
-    template <class BBOX>
-    bool kdtree_get_bbox(BBOX& /* bb */) const
-    {
-        return false;
-    }
-
-public:
-    std::vector<Point> data;
-};
-
+// public:
+//     std::vector<Point> data;
+// };
 
 struct BoundingBox {
     BoundingBox() { }
@@ -377,9 +333,10 @@ struct BoundingBox {
 
     Point relative_pos(const Point& point) { return (point - min).cwiseQuotient(diag()); }
 
-    GridKey grid_key(const Point& point, float step) {
-        Point pos = (point - min)/step;
-        return GridKey{(uint32_t)pos.x(), (uint32_t)pos.y(), (uint32_t)pos.z()};
+    GridKey grid_key(const Point& point, float step)
+    {
+        Point pos = (point - min) / step;
+        return GridKey { (uint32_t)pos.x(), (uint32_t)pos.y(), (uint32_t)pos.z() };
     }
 
     Point center() { return 0.5f * (max + min); }
@@ -418,10 +375,10 @@ struct BoundingBox {
 
     // Helper
     float radius = 1.0;
-    Eigen::Vector3i dim = Vector3i{1, 1, 1};
+    Eigen::Vector3i dim = Vector3i { 1, 1, 1 };
 };
 
-
+#if 0
 struct Mesh {
     void reset()
     {
@@ -429,6 +386,7 @@ struct Mesh {
         C.clear();
         F.clear();
     }
+
 
     void dump() {
         std::cout << "Mesh vertext: " << std::fixed << V.size() << ", face: " << F.size() << std::endl;
@@ -599,169 +557,6 @@ struct Mesh {
         return true;
     }
 
-    bool loadPLY(const char* filename)
-    {
-        int count;
-        char line[2048], *tv[256];
-        float x[3];
-        uint8_t rgb[3];
-        size_t n_vertex, n_face;
-        Face one_face_index;
-
-        FILE* fp = fopen(filename, "r");
-        if (fp == NULL) {
-            fprintf(stderr, "Error: %s could not be opened for reading ...", filename);
-            return false;
-        }
-
-        reset();
-
-        // parsing ply header ...
-        bool has_ply_magic = false;
-        bool binary_format = false;
-        bool has_color = false;
-
-        n_vertex = n_face = 0;
-        while (fgets(line, sizeof(line), fp) != NULL) {
-            count = get_token(line, ' ', 256, tv);
-
-            if (is_command(tv[0], "end_header"))
-                break;
-
-            if (is_command(tv[0], "ply"))
-                has_ply_magic = true;
-
-            if (is_command(tv[0], "format"))
-                binary_format = (strstr(tv[1], "binary") != NULL);
-
-            if (is_command(tv[0], "element")) {
-                if (is_command(tv[1], "vertex"))
-                    n_vertex = atoi(tv[2]);
-                else if (is_command(tv[1], "face"))
-                    n_face = atoi(tv[2]);
-            }
-
-            if (is_command(tv[0], "property") && is_command(tv[2], "red"))
-                has_color = true;
-        }
-
-        if (!has_ply_magic) {
-            fprintf(stderr, "Error: %s is not ply file...", filename);
-            fclose(fp);
-            return false;
-        }
-
-        if (binary_format) {
-            // vertex ...
-            while (n_vertex > 0 && !feof(fp)) {
-                fread(x, sizeof(float), 3, fp);
-                V.push_back(Point { x[0], x[1], x[2] });
-                if (has_color) {
-                    fread(rgb, sizeof(uint8_t), 3, fp);
-                    C.push_back(Color { (float)rgb[0] / 255.0f, (float)rgb[1] / 255.0f, (float)rgb[2] / 255.0f });
-                }
-                n_vertex--;
-            }
-
-            // face ...
-            while (n_face > 0 && !feof(fp)) {
-                one_face_index.clear();
-                int j, f;
-                uint8_t f_n; // ply format !!!
-                fread(&f_n, sizeof(uint8_t), 1, fp);
-                for (j = 0; j < (int)f_n; j++) {
-                    fread(&f, sizeof(int), 1, fp);
-                    one_face_index.push_back(f);
-                }
-                if (one_face_index.size() >= 3)
-                    F.push_back(one_face_index);
-                n_face--;
-            } // end reading face
-        } else { // ascii format
-            // vertex ...
-            while (n_vertex > 0 && fgets(line, sizeof(line), fp) != NULL) {
-                count = get_token(line, ' ', 8, tv);
-                if (has_color) {
-                    if (count == 7) {
-                        V.push_back(Point { (float)atof(tv[1]), (float)atof(tv[2]), (float)atof(tv[3]) });
-                        C.push_back(Color { (float)atof(tv[4]) / 255.0f, (float)atof(tv[5]) / 255.0f, (float)atof(tv[6]) / 255.0f });
-                    }
-                } else {
-                    if (count == 4)
-                        V.push_back(Point { (float)atof(tv[1]), (float)atof(tv[2]), (float)atof(tv[3]) });
-                }
-                n_vertex--;
-            } // end reading vertex
-
-            // face ...
-            while (n_face > 0 && fgets(line, sizeof(line), fp) != NULL) {
-                count = get_token(line, ' ', 256, tv);
-                one_face_index.clear();
-                for (int j = 1; j < atoi(tv[0]); j++)
-                    one_face_index.push_back(atoi(tv[j]));
-                if (one_face_index.size() >= 3)
-                    F.push_back(one_face_index);
-                n_face--;
-            } // end reading face
-        }
-
-        fclose(fp);
-        return true;
-    }
-
-    bool savePLY(const char* filename)
-    {
-        FILE* fp = fopen(filename, "wb");
-        if (fp == NULL) {
-            fprintf(stderr, "Error: %s could not be opened for writing ...", filename);
-            return false;
-        }
-
-        /*write header */
-        fprintf(fp, "ply\n");
-        fprintf(fp, "format binary_little_endian 1.0\n");
-        fprintf(fp, "element vertex %ld\n", V.size());
-        fprintf(fp, "property float x\n");
-        fprintf(fp, "property float y\n");
-        fprintf(fp, "property float z\n");
-        if (C.size() == V.size()) {
-            fprintf(fp, "property uchar red\n");
-            fprintf(fp, "property uchar green\n");
-            fprintf(fp, "property uchar blue\n");
-        }
-        fprintf(fp, "element face %ld\n", F.size());
-        fprintf(fp, "property list uchar int vertex_indices\n");
-        fprintf(fp, "end_header\n");
-
-        // write vertex
-        for (size_t i = 0; i < V.size(); i++) {
-            fwrite(&V[i].x(), sizeof(float), 1, fp);
-            fwrite(&V[i].y(), sizeof(float), 1, fp);
-            fwrite(&V[i].z(), sizeof(float), 1, fp);
-
-            if (C.size() == V.size()) {
-                uint8_t rgb[3];
-                rgb[0] = (uint8_t)(C[i].r * 255.0);
-                rgb[1] = (uint8_t)(C[i].g * 255.0);
-                rgb[2] = (uint8_t)(C[i].b * 255.0);
-                fwrite(rgb, sizeof(char), 3, fp);
-            }
-        }
-
-        // write Face
-        for (Face face : F) {
-            uint8_t n = (uint8_t)face.size();
-            fwrite(&n, sizeof(uint8_t), 1, fp);
-            for (size_t f : face) {
-                int index = (int)f;
-                fwrite(&index, sizeof(int), 1, fp);
-            }
-        }
-
-        fclose(fp);
-        return true;
-    }
-
     void snap(float e=D_EPISON, float t=T_EPISON_15) {
         std::vector<Plane> planes;
 
@@ -888,8 +683,7 @@ public:
     std::vector<Face> F; // Face Index List
 };
 
-
-
+#endif
 
 void test_plane()
 {
@@ -930,24 +724,23 @@ void test_plane()
     Mesh mesh;
 
     // mesh.savePLY("empty.ply");
-    mesh.loadOBJ("mesh.obj");
+    // mesh.loadOBJ("mesh.obj");
+    mesh.loadPLY("lego/point/pc.ply");
     mesh.dump();
+    mesh.saveOBJ("test.obj");
 
     // BoundingBox aabb(mesh.V);
     // aabb.voxel(512);
     // std::cout << "aabb(V):" << aabb << std::endl;
 
-    Mesh outmesh = mesh.grid(1024);
-    outmesh.saveOBJ("grid.obj");
-
+    // Mesh outmesh = mesh.grid(1024);
+    // outmesh.saveOBJ("grid.obj");
 
     // mesh.snap(0.05f, 2*T_EPISON_10);
     // mesh.saveOBJ("snap.obj");
 
     // Material material;
     // material.save("test.mtl");
-
-
 
     // GridDensity grid_density;
     // GridColor grid_color;
@@ -964,7 +757,7 @@ void test_plane()
 
     // if (grid_density.find(grid_key(101, 201, 301)) == grid_density.end())
     //     std::cout << "not found 101" << std::endl;
-    // else 
+    // else
     //     std::cout << "found 101" << std::endl;
 
     // for (auto d:grid_density) {

@@ -30,11 +30,10 @@ using namespace std;
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
 using namespace Eigen;
 
-
 #include "../include/meshbox.h"
 #include "tinylog.h"
 
-#define MAX_POINTS (5*1024*1024)
+#define MAX_POINTS (5 * 1024 * 1024)
 
 #define MAX_DEPTH 16384.0f
 #define MAX_IMAGES 512
@@ -42,11 +41,16 @@ using namespace Eigen;
 
 struct Camera {
     // transform matrix = K*[R | T]
-    Camera(): K(Matrix3f::Identity()), R(Matrix3f::Identity()), T(Vector3f::Zero()) {
+    Camera()
+        : K(Matrix3f::Identity())
+        , R(Matrix3f::Identity())
+        , T(Vector3f::Zero())
+    {
         update();
     }
 
-    void update() {
+    void update()
+    {
         KR = K * R;
         O = K * T;
         FWD_norm = R.col(2).normalized();
@@ -60,18 +64,18 @@ struct Camera {
                 P(r, c) = KR(r, c);
             P(r, 3) = O(r, 0);
         }
-        Matrix3f M1 = P(Eigen::placeholders::all, {1, 2, 3}); // x
-        Matrix3f M2 = P(Eigen::placeholders::all, {0, 2, 3}); // y
-        Matrix3f M3 = P(Eigen::placeholders::all, {0, 1, 3}); // z
-        Matrix3f M4 = P(Eigen::placeholders::all, {0, 1, 2}); // t
+        Matrix3f M1 = P(Eigen::placeholders::all, { 1, 2, 3 }); // x
+        Matrix3f M2 = P(Eigen::placeholders::all, { 0, 2, 3 }); // y
+        Matrix3f M3 = P(Eigen::placeholders::all, { 0, 1, 3 }); // z
+        Matrix3f M4 = P(Eigen::placeholders::all, { 0, 1, 2 }); // t
 
         C3(0) = M1.determinant();
         C3(1) = -M2.determinant();
         C3(2) = M3.determinant();
         float t = -M4.determinant();
-        C3(0) = C3(0)/t;
-        C3(1) = C3(1)/t;
-        C3(2) = C3(2)/t;
+        C3(0) = C3(0) / t;
+        C3(1) = C3(1) / t;
+        C3(2) = C3(2) / t;
     }
 
     void load(const string filename);
@@ -84,14 +88,17 @@ struct Camera {
     // private for past
     Matrix3f KR;
     Vector3f O;
-    Vector3f FWD_norm;// Forward normal
-    Matrix3f R_inv;// R_inverse
-    Matrix3f R_K_inv;// R_inverse * K_inverse
+    Vector3f FWD_norm; // Forward normal
+    Matrix3f R_inv; // R_inverse
+    Matrix3f R_K_inv; // R_inverse * K_inverse
     Vector3f C3;
 };
 
 struct Ray {
-    Ray(): o(Vector3f::Zero()), d(Vector3f::Zero()) {
+    Ray()
+        : o(Vector3f::Zero())
+        , d(Vector3f::Zero())
+    {
     }
 
     Eigen::Vector3f o;
@@ -99,12 +106,14 @@ struct Ray {
 };
 
 struct Point {
-    Point(): xyz(Vector3f::Zero()), rgba(Vector4f::Zero()) {
+    Point()
+        : xyz(Vector3f::Zero())
+        , rgba(Vector4f::Zero())
+    {
     }
     Vector3f xyz;
-    Vector4f rgba;  // w == valid ? 1.0f, 0.0f
+    Vector4f rgba; // w == valid ? 1.0f, 0.0f
 };
-
 
 // 0) Device
 // 1) Camera
@@ -119,8 +128,8 @@ void dump_gpu_memory()
     cudaMemGetInfo(&avail, &total);
 
     used = total - avail;
-    cout << "GPU memory used " << (float)used / MEGA_BYTES << " M"
-         << ", free " << (float)avail / MEGA_BYTES << " M" << endl;
+    tlog::info() << "GPU used " << (float)used / MEGA_BYTES << " M"
+                 << ", free " << (float)avail / MEGA_BYTES << " M";
 }
 
 bool has_cuda_device()
@@ -128,8 +137,10 @@ bool has_cuda_device()
     int i, count = 0;
 
     cudaGetDeviceCount(&count);
-    if (count == 0)
-        throw std::runtime_error{ fmt::format("NO GPU Device") };
+    if (count == 0) {
+        tlog::error() << "NO GPU Device";
+        return false;
+    }
 
     for (i = 0; i < count; i++) {
         cudaDeviceProp prop;
@@ -138,10 +149,12 @@ bool has_cuda_device()
                 break;
         }
     }
-    if (i == count)
-        throw std::runtime_error{ fmt::format("NO GPU supporting CUDA") };
+    if (i == count) {
+        tlog::error() << "NO GPU supporting CUDA";
+        return false;
+    }
 
-    std::cout << "Running on GPU " << i << " ... " << std::endl;
+    tlog::info() << "Running on GPU " << i << " ... ";
     cudaSetDevice(i);
     cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024 * 128);
 
@@ -151,7 +164,7 @@ bool has_cuda_device()
 // 1) Camera
 /************************************************************************************/
 // xxxx8888
-__device__ float l2_distance(const Vector3f &a, const Vector3f &b)
+__device__ float l2_distance(const Vector3f& a, const Vector3f& b)
 {
     Vector3f c = a - b;
     return sqrtf(c.x() * c.x() + c.y() * c.y() + c.z() * c.z());
@@ -171,7 +184,7 @@ __device__ void image_to_world(
     const int u, const int v, const float depth,
     const Camera& camera, Vector3f* __restrict__ xyz)
 {
-    Vector3f pt = Vector3f{ depth*u, depth*v, depth} - camera.O;
+    Vector3f pt = Vector3f { depth * u, depth * v, depth } - camera.O;
     *xyz = camera.R_K_inv * pt;
 }
 
@@ -185,19 +198,19 @@ __device__ void world_to_image(const Vector3f xyz, const Camera& camera,
 }
 
 __host__ __device__ void uv_to_ray(
-    const int u, const int v, 
+    const int u, const int v,
     const uint32_t width, const uint32_t height,
     const Camera camera, const float depth,
     Vector3f* __restrict__ endpoint)
 {
     Vector3f dir = Vector3f {
-        ((float)u - (float)width/2.0f) / camera.K(0, 0), // focal_length_x
-        ((float)v - (float)height/2.0f) / camera.K(1, 1), // focal_length_y,
+        ((float)u - (float)width / 2.0f) / camera.K(0, 0), // focal_length_x
+        ((float)v - (float)height / 2.0f) / camera.K(1, 1), // focal_length_y,
         1.0f
     };
     dir = camera.R * dir;
     float cos_theta = dir.dot(camera.FWD_norm) + 1.0e-10f;
-    *endpoint = camera.T + depth/cos_theta * dir; // ray.o + (depth/cos_theta) * ray.dir
+    *endpoint = camera.T + depth / cos_theta * dir; // ray.o + (depth/cos_theta) * ray.dir
 }
 
 static void read_camera(const string filename, Camera& camera)
@@ -235,16 +248,21 @@ void Camera::load(const string filename) { read_camera(filename, *this); }
 void Camera::dump()
 {
     cout << "Camera:" << endl;
-    cout << "K:" << endl << this->K << endl;
-    cout << "R:" << endl << this->R << endl;
-    cout << "T:" << endl << this->T << endl;
-    cout << "KR:" << endl << this->K * this->R << endl;
-    cout << "R_K_inv:" << endl << this->R_K_inv << endl;
+    cout << "K:" << endl
+         << this->K << endl;
+    cout << "R:" << endl
+         << this->R << endl;
+    cout << "T:" << endl
+         << this->T << endl;
+    cout << "KR:" << endl
+         << this->K * this->R << endl;
+    cout << "R_K_inv:" << endl
+         << this->R_K_inv << endl;
 }
 
 // 2) Image
 /************************************************************************************/
-inline void depth_rgb(float depth, uint8_t *R, uint8_t *G, uint8_t *B)
+inline void depth_rgb(float depth, uint8_t* R, uint8_t* G, uint8_t* B)
 {
     uint32_t rgb = (uint32_t)(depth * 512.0f);
     *R = (rgb & 0xff0000) >> 16;
@@ -252,10 +270,10 @@ inline void depth_rgb(float depth, uint8_t *R, uint8_t *G, uint8_t *B)
     *B = (rgb & 0xff);
 }
 
-inline void rgb_depth(uint8_t R, uint8_t G, uint8_t B, float *depth)
+inline void rgb_depth(uint8_t R, uint8_t G, uint8_t B, float* depth)
 {
     uint32_t rgb = ((uint32_t)R << 16) | ((uint32_t)G << 8) | ((uint32_t)B);
-    *depth = (float)rgb/512.0f;
+    *depth = (float)rgb / 512.0f;
 }
 
 float* load_image_with_depth(const string& image_filename, int& width, int& height)
@@ -265,7 +283,6 @@ float* load_image_with_depth(const string& image_filename, int& width, int& heig
     return image_float_data;
 }
 
-
 float* load_image_and_depth(
     const string& image_filename, const string& depth_filename, int& width, int& height)
 {
@@ -274,12 +291,11 @@ float* load_image_and_depth(
 #if 0   
     float* image_float_data = load_stbi(&width, &height, image_filename.c_str());
 #endif
-    uint8_t *image_data = stbi_load(image_filename.c_str(), &width, &height, &n, 0);
+    uint8_t* image_data = stbi_load(image_filename.c_str(), &width, &height, &n, 0);
     int depth_width, depth_height;
-    uint8_t *depth_data = stbi_load(depth_filename.c_str(), &depth_width, &depth_height, &n, 0);
+    uint8_t* depth_data = stbi_load(depth_filename.c_str(), &depth_width, &depth_height, &n, 0);
     if (width != depth_width || height != depth_height) {
-        throw std::runtime_error{ fmt::format(
-            "Image {} size is not same as depth {}", image_filename, depth_filename) };
+        tlog::error() << "Image " << image_filename << " size is not same as depth " << depth_filename;
     }
 
     float* image_float_data = (float*)malloc(width * height * sizeof(float) * 4);
@@ -295,7 +311,9 @@ float* load_image_and_depth(
             dst[2] = (float)src1[2];
             rgb_depth(src2[0], src2[1], src2[2], &dst[3]);
         }
-        src1 += 4; src2 += 4; dst += 4;
+        src1 += 4;
+        src2 += 4;
+        dst += 4;
     }
     free(image_data); // release memory of color data
     free(depth_data); // release memory of depth data
@@ -306,11 +324,11 @@ float* load_image_and_depth(
 // 3) Point
 /************************************************************************************/
 __global__ void fusion_point_kernel(
-    const uint32_t n_images, 
+    const uint32_t n_images,
     const uint32_t image_k,
     const uint32_t image_width,
     const uint32_t image_height,
-    const cudaTextureObject_t* __restrict__ gpu_textures, 
+    const cudaTextureObject_t* __restrict__ gpu_textures,
     const Camera* __restrict__ gpu_cameras,
     Point* __restrict__ one_image_gpu_points)
 {
@@ -330,11 +348,10 @@ __global__ void fusion_point_kernel(
     uv_to_ray(x, y, image_width, image_height, gpu_cameras[image_k], depth, &sum_xyz);
     Vector3f k_xyz = sum_xyz;
 
-
 #if 1
     one_image_gpu_points[center].xyz = sum_xyz;
     one_image_gpu_points[center].rgba
-        = Vector4f{ sum_rgba.x, sum_rgba.y, sum_rgba.z, 1.0f};  // mark w == 1.0f
+        = Vector4f { sum_rgba.x, sum_rgba.y, sum_rgba.z, 1.0f }; // mark w == 1.0f
 #else
     int match_count = 0;
 
@@ -388,10 +405,10 @@ __global__ void fusion_point_kernel(
         float fc = (float)match_count + 1.0f;
 
         one_image_gpu_points[center].xyz
-            = Vector3f{ sum_xyz.x()/fc, sum_xyz.y()/fc, sum_xyz.z()/fc};
+            = Vector3f { sum_xyz.x() / fc, sum_xyz.y() / fc, sum_xyz.z() / fc };
         one_image_gpu_points[center].rgba
-            = Vector4f{ sum_rgba.x/fc, sum_rgba.y/fc, sum_rgba.z/fc, 1.0f};  // valid w == 1.0f
-    } 
+            = Vector4f { sum_rgba.x / fc, sum_rgba.y / fc, sum_rgba.z / fc, 1.0f }; // valid w == 1.0f
+    }
 #endif
 }
 
@@ -403,23 +420,23 @@ vector<string> load_files(const string dirname, const string extname)
 
     dir = opendir(dirname.c_str());
     if (dir == NULL) {
-        throw std::runtime_error{fmt::format("Cannot open directory {}.", dirname)};
-    }
+        tlog::error() << "Cannot open directory " << dirname;
+    } else {
+        while ((ent = readdir(dir)) != NULL) {
+            char* name = ent->d_name;
+            if (strcmp(name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+                continue;
 
-    while ((ent = readdir(dir)) != NULL) {
-        char* name = ent->d_name;
-        if (strcmp(name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
-            continue;
-
-        if (strstr(name, extname.c_str()))
-            files.push_back(dirname + "/" + string(name));
+            if (strstr(name, extname.c_str()))
+                files.push_back(dirname + "/" + string(name));
+        }
+        closedir(dir);
     }
-    closedir(dir);
 
     return files;
 }
 
-void save_point_cloud(const string& filename, const vector<Point> &pc)
+void save_point_cloud(const string& filename, const vector<Point>& pc)
 {
     uint32_t n_pc = pc.size();
     if (n_pc >= MAX_POINTS)
@@ -463,7 +480,7 @@ void save_point_cloud(const string& filename, const vector<Point> &pc)
     fclose(fp);
 }
 
-int eval_points(char *input_folder)
+int eval_points(char* input_folder)
 {
     size_t i, n_filenames;
     char output_folder[1024], file_name[2048];
@@ -482,14 +499,15 @@ int eval_points(char *input_folder)
         snprintf(file_name, sizeof(file_name), "%s/image", input_folder);
         image_filenames = load_files(file_name, ".png");
         if (image_filenames.size() < 1) {
-            throw std::runtime_error{ fmt::format("NOT images under folder '{}'", input_folder) };
+            tlog::error() << "NO images under folder '" << input_folder << "'";
+            return -1;
         }
 
         sort(image_filenames.begin(), image_filenames.end());
         n_filenames = image_filenames.size();
         if (n_filenames >= MAX_IMAGES) {
-            throw std::runtime_error{ fmt::format(
-                "Too many images (>={}) under folder '{}'", MAX_IMAGES, input_folder) };
+            tlog::error() << "Too many images (>=" << MAX_IMAGES << ") under folder '" << input_folder << "'";
+            return -1;
         }
     }
 
@@ -499,13 +517,13 @@ int eval_points(char *input_folder)
         snprintf(file_name, sizeof(file_name), "%s/camera", input_folder);
         camera_filenames = load_files(file_name, ".txt");
         if (camera_filenames.size() < 1) {
-            throw std::runtime_error{ fmt::format(
-                "NO camera files under folder '{}'", input_folder) };
+            tlog::error() << "NO camera files under folder '" << input_folder << "'";
+            return -1;
         }
         sort(camera_filenames.begin(), camera_filenames.end());
         if (image_filenames.size() != camera_filenames.size()) {
-            throw std::runtime_error{ fmt::format(
-                "image/camera files DOES NOT match under folder '{}'", input_folder) };
+            tlog::error() << "image/camera files DOES NOT match under folder '" << input_folder << "'";
+            return -1;
         }
     }
 
@@ -516,8 +534,8 @@ int eval_points(char *input_folder)
         depth_filenames = load_files(file_name, ".png");
         // if depth_filnames == 0, suppose image including depth information in A channel
         if (depth_filenames.size() > 0 && depth_filenames.size() != n_filenames) {
-            throw std::runtime_error{ fmt::format(
-                "image/depth files DOES NOT match under folder '{}'", input_folder) };
+            tlog::error() << "image/depth files DOES NOT match under folder '" << input_folder << "'";
+            return -1;
         }
         sort(depth_filenames.begin(), depth_filenames.end());
     }
@@ -530,23 +548,23 @@ int eval_points(char *input_folder)
         int x, y, n, ok;
         ok = stbi_info(image_filenames[0].c_str(), &x, &y, &n);
         if (ok != 1) {
-            throw std::runtime_error{ fmt::format(
-                "image '{}' pixel size is not valid", image_filenames[0]) };
+            tlog::error() << "image '" << image_filenames[0] << "' pixel size is not valid";
+            return -1;
         }
         image_width = x;
         image_height = y;
         for (i = 1; i < n_filenames; i++) {
             ok = stbi_info(image_filenames[i].c_str(), &x, &y, &n);
             if (ok != 1 || x != image_width || y != image_height) {
-                throw std::runtime_error{ fmt::format(
-                    "image pixel size IS NOT same under '{}'", input_folder) };
+                tlog::error() << "image pixel size IS NOT same under '" << input_folder << "'";
+                return -1;
             }
         }
         for (i = 0; i < n_filenames; i++) {
             ok = stbi_info(depth_filenames[i].c_str(), &x, &y, &n);
             if (ok != 1 || x != image_width || y != image_height) {
-                throw std::runtime_error{ fmt::format(
-                    "image/depth pixel size IS NOT same under '{}'", input_folder) };
+                tlog::error() << "image/depth pixel size IS NOT same under '" << input_folder << "'";
+                return -1;
             }
         }
     }
@@ -568,7 +586,7 @@ int eval_points(char *input_folder)
         load_camera_logger.success("OK !");
     }
 
-    cudaTextureObject_t *gpu_textures;
+    cudaTextureObject_t* gpu_textures;
     CUDA_CHECK_THROW(cudaMalloc(&gpu_textures, n_filenames * sizeof(cudaTextureObject_t)));
     {
         // Loading image/depth and save to textures
@@ -592,7 +610,7 @@ int eval_points(char *input_folder)
             cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
             CUDA_CHECK_THROW(cudaMallocArray(&cuArray, &channelDesc, width, height));
             CUDA_CHECK_THROW(cudaMemcpy2DToArray(cuArray /*dst*/, 0 /*wOffset*/, 0 /*hOffset*/,
-                image_float_data /*src*/, width * sizeof(float4) /*spitch bytes*/, 
+                image_float_data /*src*/, width * sizeof(float4) /*spitch bytes*/,
                 width * sizeof(float4) /*width bytes*/, height /*rows*/, cudaMemcpyHostToDevice));
             CUDA_CHECK_THROW(cudaDeviceSynchronize());
             free(image_float_data); // release memory of image data
@@ -644,13 +662,12 @@ int eval_points(char *input_folder)
             one_image_gpu_points.memset(0);
             fusion_point_kernel<<<blocks, threads>>>(
                 (uint32_t)n_filenames,
-                (uint32_t)i, 
+                (uint32_t)i,
                 image_width,
-                image_height, 
+                image_height,
                 gpu_textures,
                 gpu_cameras.data(),
-                one_image_gpu_points.data()
-            );
+                one_image_gpu_points.data());
             CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
             one_image_gpu_points.copy_to_host(one_image_cpu_points);
@@ -664,7 +681,6 @@ int eval_points(char *input_folder)
                 //     continue;
                 if (pc.rgba.w() > 0.5f)
                     all_cpu_points.push_back(pc);
-    
             }
         }
         fusion_points_logger.success("OK !");
