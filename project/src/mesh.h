@@ -23,13 +23,11 @@ using namespace Eigen;
 #define TINYPLY_IMPLEMENTATION
 #include "tinyply.h"
 
-
 #define D_EPISON 1.0e-03 // distance epision
 // 1.0 - math.cos(10.0/180.0 * 3.1415926) -- 0.01519
 // 1.0 - math.cos(15.0 * 3.1415926/180.0) -- 0.03407
 #define T_EPISON_10 0.01519f
 #define T_EPISON_15 0.03407f
-
 
 using Point = Eigen::Vector3f;
 using Normal = Eigen::Vector3f;
@@ -43,7 +41,6 @@ std::ostream& operator<<(std::ostream& os, const Point& point)
     os << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
     return os;
 }
-
 
 struct Plane {
     Plane(Point o, Normal n)
@@ -244,7 +241,7 @@ struct BoundingBox {
         os << "min=[" << bb.min.x() << "," << bb.min.y() << "," << bb.min.z() << "], ";
         os << "max=[" << bb.max.x() << "," << bb.max.y() << "," << bb.max.z() << "], ";
         os << "dim=[" << bb.dim.x() << "," << bb.dim.y() << "," << bb.dim.z() << "], ";
-        os << "radius=" << bb.step/2.0;
+        os << "radius=" << bb.step / 2.0;
         os << "]";
         return os;
     }

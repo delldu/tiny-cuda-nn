@@ -9,9 +9,8 @@
 #include "mesh.h"
 #include "nanoflann.hpp"
 
-struct PlaneNormals
-{
-    using coord_t = float;  //!< The type of each coordinate
+struct PlaneNormals {
+    using coord_t = float; //!< The type of each coordinate
 
     // Must return the number of normals
     inline size_t kdtree_get_point_count() const { return data.size(); }
@@ -78,7 +77,6 @@ public:
 //     std::vector<Point> data;
 // };
 
-
 void test_plane()
 {
     // Points points;
@@ -121,9 +119,8 @@ void test_plane()
     mesh.load("mesh.obj");
     // mesh.load("lego/point/pc.ply");
     mesh.dump();
-    mesh.snap(10*D_EPISON, T_EPISON_15);
+    mesh.snap(D_EPISON, T_EPISON_15);
     mesh.save("test.obj");
-
 
     // BoundingBox aabb(mesh.V);
     // aabb.voxel(512);
@@ -164,7 +161,6 @@ void test_plane()
     //     std::cout << d.first << " -- " << d.second << std::endl;
     // }
 }
-
 
 bool Mesh::loadOBJ(const char* filename)
 {
@@ -246,7 +242,6 @@ bool Mesh::saveOBJ(const char* filename)
     return true;
 }
 
-
 bool Mesh::loadPLY(const char* filename)
 {
     std::unique_ptr<std::istream> file_stream;
@@ -258,8 +253,8 @@ bool Mesh::loadPLY(const char* filename)
         file_stream.reset(new std::ifstream(filename, std::ios::binary));
 
         if (!file_stream || file_stream->fail()) {
-          tlog::error() << "Open file " << filename ;
-          return false;
+            tlog::error() << "Open file " << filename;
+            return false;
         }
 
         file_stream->seekg(0, std::ios::beg);
@@ -269,37 +264,48 @@ bool Mesh::loadPLY(const char* filename)
 
         tlog::info() << "PLY file format is " << (file.is_binary_file() ? "binary" : "ascii");
 
-        // Because most people have their own mesh types, tinyply treats parsed data as structured/typed byte buffers. 
-        // See examples below on how to marry your own application-specific data structures with this one. 
+        // Because most people have their own mesh types, tinyply treats parsed data as structured/typed byte buffers.
+        // See examples below on how to marry your own application-specific data structures with this one.
         // std::shared_ptr<tinyply::PlyData> vertices, normals, colors, texcoords, faces, tripstrip;
         std::shared_ptr<tinyply::PlyData> vertices, colors, faces;
 
-
         // The header information can be used to programmatically extract properties on elements
-        // known to exist in the header prior to reading the data. For brevity of this sample, properties 
-        // like vertex position are hard-coded: 
-        try { vertices = file.request_properties_from_element("vertex", { "x", "y", "z" }); }
-        catch (const std::exception & e) { /*std::cerr << "tinyply exception: " << e.what() << std::endl */; }
+        // known to exist in the header prior to reading the data. For brevity of this sample, properties
+        // like vertex position are hard-coded:
+        try {
+            vertices = file.request_properties_from_element("vertex", { "x", "y", "z" });
+        } catch (const std::exception& e) { /*std::cerr << "tinyply exception: " << e.what() << std::endl */
+            ;
+        }
 
         // try { normals = file.request_properties_from_element("vertex", { "nx", "ny", "nz" }); }
         // catch (const std::exception & e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */; }
 
-        try { colors = file.request_properties_from_element("vertex", { "red", "green", "blue" }); }
-        catch (const std::exception & e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */; }
+        try {
+            colors = file.request_properties_from_element("vertex", { "red", "green", "blue" });
+        } catch (const std::exception& e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */
+            ;
+        }
 
-        try { colors = file.request_properties_from_element("vertex", { "r", "g", "b", "a" }); }
-        catch (const std::exception & e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */; }
+        try {
+            colors = file.request_properties_from_element("vertex", { "r", "g", "b", "a" });
+        } catch (const std::exception& e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */
+            ;
+        }
 
         // try { texcoords = file.request_properties_from_element("vertex", { "u", "v" }); }
         // catch (const std::exception & e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */; }
 
-        // Providing a list size hint (the last argument) is a 2x performance improvement. If you have 
-        // arbitrary ply files, it is best to leave this 0. 
-        try { faces = file.request_properties_from_element("face", { "vertex_indices" }, 3); }
-        catch (const std::exception & e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */ ; }
+        // Providing a list size hint (the last argument) is a 2x performance improvement. If you have
+        // arbitrary ply files, it is best to leave this 0.
+        try {
+            faces = file.request_properties_from_element("face", { "vertex_indices" }, 3);
+        } catch (const std::exception& e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */
+            ;
+        }
 
         // Tristrips must always be read with a 0 list size hint (unless you know exactly how many elements
-        // are specifically in the file, which is unlikely); 
+        // are specifically in the file, which is unlikely);
         // try { tripstrip = file.request_properties_from_element("tristrips", { "vertex_indices" }, 0); }
         // catch (const std::exception & e) { /*std::cerr << "tinyply exception: " << e.what() << std::endl */; }
 
@@ -313,14 +319,14 @@ bool Mesh::loadPLY(const char* filename)
             std::memcpy(V.data()->data(), vertices->buffer.get(), vertices->buffer.size_bytes());
         }
         if (colors && (colors->t == tinyply::Type::UINT8 || colors->t == tinyply::Type::INT8)) {
-            uint8_t *p = (uint8_t *)colors->buffer.get();
+            uint8_t* p = (uint8_t*)colors->buffer.get();
             for (size_t i = 0; i < colors->count; i++, p += 3)
-                C.push_back(Color{(float)p[0]/255.0f, (float)p[1]/255.0f, (float)p[2]/255.0f});
+                C.push_back(Color { (float)p[0] / 255.0f, (float)p[1] / 255.0f, (float)p[2] / 255.0f });
         }
 
         if (faces && (faces->t == tinyply::Type::INT32 || faces->t == tinyply::Type::INT32)) {
             Face one_face;
-            int *p = (int *)faces->buffer.get();
+            int* p = (int*)faces->buffer.get();
             for (size_t i = 0; i < faces->count; i++, p += 3) {
                 one_face.clear();
                 one_face.push_back(p[0]);
@@ -329,8 +335,7 @@ bool Mesh::loadPLY(const char* filename)
                 F.push_back(one_face);
             }
         }
-    }
-    catch (const std::exception & e) {
+    } catch (const std::exception& e) {
         tlog::error() << "loadPLY exception: " << e.what();
         return false;
     }
@@ -338,12 +343,11 @@ bool Mesh::loadPLY(const char* filename)
     return true;
 }
 
-
 bool Mesh::load(const char* filename)
 {
-    char *p = strrchr((char *)filename, (int)'.');
+    char* p = strrchr((char*)filename, (int)'.');
 
-    if (p == NULL || (strcasecmp(p, ".ply") != 0  && strcasecmp(p, ".obj") != 0)) {
+    if (p == NULL || (strcasecmp(p, ".ply") != 0 && strcasecmp(p, ".obj") != 0)) {
         tlog::error() << "Mesh load only support .ply or .obj format";
         return false;
     }
@@ -354,10 +358,9 @@ bool Mesh::load(const char* filename)
     return loadOBJ(filename);
 }
 
-
 bool Mesh::save(const char* filename)
 {
-    char *p = strrchr((char *)filename, (int)'.');
+    char* p = strrchr((char*)filename, (int)'.');
 
     if (p == NULL || strcasecmp(p, ".obj") != 0) {
         tlog::error() << "Mesh save only support .obj format";
@@ -386,7 +389,6 @@ GridIndex Mesh::grid_index(size_t N)
     return gi;
 }
 
-
 Mesh Mesh::grid_mesh(GridIndex gi)
 {
     Mesh outmesh; // outmesh.N will be used for saving density ?
@@ -394,8 +396,8 @@ Mesh Mesh::grid_mesh(GridIndex gi)
     float density_mean = 0.0f;
     float density_stdv = 0.0f;
     bool has_color = (V.size() == C.size());
-    for (auto n:gi) {
-        const IndexList &index_list = n.second;
+    for (auto n : gi) {
+        const IndexList& index_list = n.second;
         density_mean += index_list.size();
         density_stdv += index_list.size() * index_list.size();
 
@@ -421,11 +423,11 @@ Mesh Mesh::grid_mesh(GridIndex gi)
             sum_color.z() /= index_list.size();
         }
 
-        outmesh.V.push_back(Point{sum_point.x(), sum_point.y(), sum_point.z()});
+        outmesh.V.push_back(Point { sum_point.x(), sum_point.y(), sum_point.z() });
         // outmesh.N.push_back(Normal{(float)index_list.size(), 0.0f, 0.0f});
 
         if (has_color) {
-            outmesh.C.push_back(Color{sum_color.x(), sum_color.y(), sum_color.z()});
+            outmesh.C.push_back(Color { sum_color.x(), sum_color.y(), sum_color.z() });
         }
     }
     if (gi.size() > 0) {
@@ -481,7 +483,6 @@ ClusterIndex Mesh::segment(float radius)
     return cluster;
 }
 
-
 void Mesh::snap(float e, float t)
 {
     std::vector<Plane> planes;
@@ -515,15 +516,15 @@ void Mesh::snap(float e, float t)
     snap_logger.success("OK !");
 
     PlaneNormals normals;
-    for (Plane plane:planes)
+    for (Plane plane : planes)
         normals.data.push_back(plane.n);
 
     // construct a kd-tree index:
     using normal_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<
         nanoflann::L2_Simple_Adaptor<float, PlaneNormals>,
         PlaneNormals, 3 /* dim */
-    >;
-    normal_kd_tree_t index(3 /*dim*/, normals, {10 /* max leaf */});
+        >;
+    normal_kd_tree_t index(3 /*dim*/, normals, { 10 /* max leaf */ });
     float query_point[3];
 
     const size_t num_results = 256;
@@ -551,7 +552,7 @@ void Mesh::snap(float e, float t)
         for (size_t k = 1; k < resultSet.size(); k++) {
             size_t j = ret_index[k];
             if (need_check_planes[j] == 0 || j <= i)
-                 continue;
+                continue;
 
             if (planes[i].coincide(planes[j], e, t)) {
                 planes[i].ref_points.insert(planes[i].ref_points.end(), planes[j].ref_points.begin(), planes[j].ref_points.end());
