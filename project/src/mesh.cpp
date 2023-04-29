@@ -44,38 +44,38 @@ public:
     std::vector<Normal> data;
 };
 
-// struct PointCloud
-// {
-//     using coord_t = float;  //!< The type of each point
+struct PointCloud
+{
+    using coord_t = float;  //!< The type of each point
 
-//     // Must return the number of points
-//     inline size_t kdtree_get_point_count() const { return data.size(); }
+    // Must return the number of points
+    inline size_t kdtree_get_point_count() const { return data.size(); }
 
-//     //  "if/else's" are actually solved at compile time.
-//     inline float kdtree_get_pt(const size_t idx, const size_t dim) const
-//     {
-//         if (dim == 0)
-//             return data[idx].x();
-//         else if (dim == 1)
-//             return data[idx].y();
-//         else
-//             return data[idx].z();
-//     }
+    //  "if/else's" are actually solved at compile time.
+    inline float kdtree_get_pt(const size_t idx, const size_t dim) const
+    {
+        if (dim == 0)
+            return data[idx].x();
+        else if (dim == 1)
+            return data[idx].y();
+        else
+            return data[idx].z();
+    }
 
-//     // Optional bounding-box computation: return false to default to a standard
-//     // bbox computation loop.
-//     //   Return true if the BBOX was already computed by the class and returned
-//     //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
-//     //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
-//     template <class BBOX>
-//     bool kdtree_get_bbox(BBOX& /* bb */) const
-//     {
-//         return false;
-//     }
+    // Optional bounding-box computation: return false to default to a standard
+    // bbox computation loop.
+    //   Return true if the BBOX was already computed by the class and returned
+    //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
+    //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
+    template <class BBOX>
+    bool kdtree_get_bbox(BBOX& /* bb */) const
+    {
+        return false;
+    }
 
-// public:
-//     std::vector<Point> data;
-// };
+public:
+    std::vector<Point> data;
+};
 
 void test_plane()
 {
@@ -98,7 +98,7 @@ void test_plane()
     // std::cout << p << " on plane (epision = default) ? " << plane.contains(p) << std::endl;
     // std::cout << p << " on plane (epision = 0.1f)? " << plane.contains(p, 0.1f) << std::endl;
 
-    // BoundingBox aabb;
+    // AABB aabb;
     // aabb.update(p1);
     // aabb.update(p2);
     // aabb.update(p3);
@@ -116,13 +116,20 @@ void test_plane()
     Mesh mesh;
 
     // mesh.savePLY("empty.ply");
-    mesh.load("mesh.obj");
-    // mesh.load("lego/point/pc.ply");
+    // mesh.load("lego/mesh.obj");
+    mesh.load("lego/002.ply");
     mesh.dump();
-    mesh.snap(D_EPISON, T_EPISON_15);
-    mesh.save("test.obj");
+    // mesh.snap(D_EPISON, T_EPISON_15);
+    // Mesh gmesh = mesh.grid_sample(256);
+    // gmesh.save("/tmp/test_256.obj");
+    MeshList cluster = mesh.fast_segment(256, 0);
+    for (size_t i = 0; i < cluster.size(); i++) {
+        std::cout << "Cluster " << i << " ... " << std::endl;
+        cluster[i].dump();
+    }
+    mesh.save("/tmp/test_32.obj");
 
-    // BoundingBox aabb(mesh.V);
+    // AABB aabb(mesh.V);
     // aabb.voxel(512);
     // std::cout << "aabb(V):" << aabb << std::endl;
 
@@ -217,7 +224,7 @@ bool Mesh::loadOBJ(const char* filename)
             face.clear();
             for (size_t v = 0; v < fnum; v++) {
                 tinyobj::index_t idx = shapes[i].mesh.indices[index_offset + v];
-                face.push_back(idx.vertex_index);
+                face.push_back((uint32_t)idx.vertex_index);
                 // idx.vertex_index, idx.normal_index, idx.texcoord_index
             }
             F.push_back(face);
@@ -326,7 +333,7 @@ bool Mesh::loadPLY(const char* filename)
 
         if (faces && (faces->t == tinyply::Type::INT32 || faces->t == tinyply::Type::INT32)) {
             Face one_face;
-            int* p = (int*)faces->buffer.get();
+            uint32_t* p = (uint32_t*)faces->buffer.get();
             for (size_t i = 0; i < faces->count; i++, p += 3) {
                 one_face.clear();
                 one_face.push_back(p[0]);
@@ -370,12 +377,9 @@ bool Mesh::save(const char* filename)
     return saveOBJ(filename);
 }
 
-GridIndex Mesh::grid_index(size_t N)
+GridIndex Mesh::grid_index(AABB& aabb)
 {
     GridIndex gi;
-
-    BoundingBox aabb(V);
-    aabb.voxel(N);
 
     auto grid_logger = tlog::Logger("Grid index ...");
     auto progress = grid_logger.progress(V.size());
@@ -389,17 +393,21 @@ GridIndex Mesh::grid_index(size_t N)
     return gi;
 }
 
-Mesh Mesh::grid_mesh(GridIndex gi)
+Mesh Mesh::grid_sample(uint32_t N)
 {
     Mesh outmesh; // outmesh.N will be used for saving density ?
 
-    float density_mean = 0.0f;
-    float density_stdv = 0.0f;
+    AABB aabb(V);
+    aabb.voxel(N);
+    GridIndex gi = grid_index(aabb);
+
+    // float density_mean = 0.0f;
+    // float density_stdv = 0.0f;
     bool has_color = (V.size() == C.size());
     for (auto n : gi) {
         const IndexList& index_list = n.second;
-        density_mean += index_list.size();
-        density_stdv += index_list.size() * index_list.size();
+        // density_mean += index_list.size();
+        // density_stdv += index_list.size() * index_list.size();
 
         Eigen::Vector3f sum_point = Vector3f::Zero();
         Eigen::Vector3f sum_color = Vector3f::Zero();
@@ -430,13 +438,13 @@ Mesh Mesh::grid_mesh(GridIndex gi)
             outmesh.C.push_back(Color { sum_color.x(), sum_color.y(), sum_color.z() });
         }
     }
-    if (gi.size() > 0) {
-        density_mean /= gi.size();
+    // if (gi.size() > 0) {
+    //     density_mean /= gi.size();
 
-        density_stdv /= gi.size();
-        density_stdv -= density_mean;
-        density_stdv = sqrtf(density_stdv);
-    }
+    //     density_stdv /= gi.size();
+    //     density_stdv -= density_mean;
+    //     density_stdv = sqrtf(density_stdv);
+    // }
 
     // for (auto n: outmesh.N) {
     //     n.y() = density_mean;
@@ -446,14 +454,14 @@ Mesh Mesh::grid_mesh(GridIndex gi)
     return outmesh;
 }
 
-Mesh Mesh::remesh(size_t N)
+Mesh Mesh::remesh(uint32_t N)
 {
     Mesh new_mesh;
-    GridIndex gi = grid_index(N);
-    new_mesh = grid_mesh(gi);
+    // GridIndex gi = grid_index(N);
+    // new_mesh = grid_mesh(gi);
 
-    // Call MC to create F for new_mesh
-    new_mesh.F.clear();
+    // // Call MC to create F for new_mesh
+    // new_mesh.F.clear();
 
     return new_mesh;
 }
@@ -469,19 +477,139 @@ Mesh Mesh::simple(float ratio)
     return new_mesh;
 }
 
-ClusterIndex Mesh::segment(float radius)
+struct IndexLabel {
+    size_t index;
+    int label;
+};
+
+bool IndexLabelSort(const IndexLabel& p0, const IndexLabel& p1)
 {
-    ClusterIndex cluster;
+    return p0.label < p1.label;
+}
 
-    if (radius > 0.0f && radius < 1.0f) {
-        IndexList c;
-        c.push_back(100);
+std::vector<Mesh> Mesh::fast_segment(uint32_t N, size_t outlier_removed_threshold)
+{
+    AABB aabb(V);
+    aabb.voxel(N);
+    float d_threshold = aabb.step;
 
-        cluster.push_back(c);
+    PointCloud pc;
+    for (Point point:V)
+        pc.data.push_back(point);
+
+    float query_point[3];
+    using pc_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<
+        nanoflann::L2_Simple_Adaptor<float, PointCloud>,
+        PointCloud, 3 /* dim */>;
+    pc_kd_tree_t index(3 /*dim*/, pc, {10 /* max leaf */});
+
+    float squaredRadius = d_threshold * d_threshold;
+    std::vector<nanoflann::ResultItem<size_t, float>> ret_indices;
+    nanoflann::RadiusResultSet<float, size_t> resultSet(squaredRadius, ret_indices);
+
+    int tag_num = 1, temp_tag_num = -1;
+    std::vector<int> labels(V.size(), 0);
+
+    auto label_logger = tlog::Logger("Segment label ...");
+    auto progress = label_logger.progress(V.size());
+    for (size_t i = 0; i < V.size(); i++) {
+        progress.update(i);
+
+        if (labels[i] != 0)
+            continue;
+
+        // do radius search ...
+        query_point[0] = V[i].x();
+        query_point[1] = V[i].y();
+        query_point[2] = V[i].z();
+
+        resultSet.clear();
+        index.findNeighbors(resultSet, query_point); // nanoflann::SearchParams(10)
+
+        int min_tag_num = tag_num;
+        for (size_t k = 0; k < resultSet.size(); k++) {
+            size_t j = ret_indices[k].first; // V[j] is points ...
+            // find the minimum label and tag it to this cluster label.
+            if (labels[j] > 0 && labels[j] < min_tag_num)
+                min_tag_num = labels[j];
+        }
+
+        for (size_t k = 0; k < resultSet.size(); k++) {
+            size_t j = ret_indices[k].first; // V[j] is points ...
+            temp_tag_num = labels[j];
+            if (temp_tag_num > min_tag_num) {
+                for (size_t old = 0; old < V.size(); old++) {
+                    if (labels[old] == temp_tag_num)
+                        labels[old] = min_tag_num;
+                }
+            }
+            labels[j] = min_tag_num;
+        }
+        tag_num++;
     }
+    label_logger.success("OK !");
+
+    auto cluster_logger = tlog::Logger("Segment cluster ...");
+    progress = cluster_logger.progress(V.size());
+
+    // Sort index_labels
+    std::vector<IndexLabel> index_labels;
+    index_labels.resize(V.size());
+    IndexLabel temp_index_label;
+    for (size_t i = 0; i < V.size(); i++) {
+        temp_index_label.index = i;
+        temp_index_label.label = labels[i];
+        index_labels[i] = temp_index_label;
+    }
+    sort(index_labels.begin(), index_labels.end(), IndexLabelSort);
+
+    MeshList cluster;
+    bool has_color = (V.size() == C.size());
+    size_t i, start_index = 0;
+
+    srand(time(NULL)); // for debug
+    for (i = 0; i < index_labels.size(); i++) {
+        progress.update(i);
+        // new cluster ?
+        if (index_labels[i].label != index_labels[start_index].label) {
+            // save previous cluster ?
+            if (i - start_index >= outlier_removed_threshold) {
+                Mesh tmesh;
+                Color color = Color {(rand() % 255)/255.0f, (rand() % 255)/255.0f, (rand() % 255)/255.0f}; // for debug
+                for (size_t j = start_index; j < i; j++) {
+                    tmesh.V.push_back(V[index_labels[j].index]);
+                    if (has_color) {
+                        tmesh.C.push_back(C[index_labels[j].index]);
+                        C[index_labels[j].index] = color; // for debug
+                    } else {
+                        C.push_back(color);
+                    }
+                }
+                cluster.push_back(tmesh);
+            }
+            start_index = i;
+        }
+    }
+    // last cluster ?
+    if ((i - start_index) >= outlier_removed_threshold) {
+        Mesh tmesh;
+        Color color = Color {(rand() % 255)/255.0f, (rand() % 255)/255.0f, (rand() % 255)/255.0f}; // debug
+        for (size_t j = start_index; j < i; j++) {
+            tmesh.V.push_back(V[index_labels[j].index]);
+            if (has_color) {
+                tmesh.C.push_back(C[index_labels[j].index]);
+                C[index_labels[j].index] = color; // debug
+            } else {
+                C.push_back(color);
+            }
+        }
+        cluster.push_back(tmesh);
+    }
+    cluster_logger.success("OK !");
 
     return cluster;
 }
+
 
 void Mesh::snap(float e, float t)
 {
@@ -536,10 +664,10 @@ void Mesh::snap(float e, float t)
     snap_logger = tlog::Logger("Create support planes ...");
     progress = snap_logger.progress(planes.size());
 
-    std::vector<int> need_check_planes(planes.size(), 1);
+    std::vector<bool> need_check_planes(planes.size(), true);
     for (size_t i = 0; i < planes.size(); i++) {
         progress.update(i);
-        if (need_check_planes[i] == 0)
+        if (! need_check_planes[i])
             continue;
 
         // do a knn search
@@ -549,9 +677,9 @@ void Mesh::snap(float e, float t)
         resultSet.init(ret_index, out_dist_sqr); // important ?
         index.findNeighbors(resultSet, &query_point[0]);
 
-        for (size_t k = 1; k < resultSet.size(); k++) {
+        for (size_t k = 1; k < resultSet.size(); k++) { // skip query point self
             size_t j = ret_index[k];
-            if (need_check_planes[j] == 0 || j <= i)
+            if (! need_check_planes[j] || j <= i)
                 continue;
 
             if (planes[i].coincide(planes[j], e, t)) {
@@ -571,7 +699,7 @@ void Mesh::snap(float e, float t)
     std::vector<Plane> support_planes;
     for (size_t i = 0; i < planes.size(); i++) {
         progress.update(i);
-        if (need_check_planes[i] == 1) {
+        if (need_check_planes[i]) {
             planes[i].refine();
             support_planes.push_back(planes[i]);
         }
@@ -589,7 +717,7 @@ void Mesh::snap(float e, float t)
         if (plane.ref_indexs.size() <= 3)
             continue;
 
-        for (size_t j : plane.ref_indexs) {
+        for (uint32_t j : plane.ref_indexs) {
             if (plane.contains(V[j], e)) {
                 V[j] = plane.project(V[j]);
             }

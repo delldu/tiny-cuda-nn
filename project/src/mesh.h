@@ -32,9 +32,9 @@ using namespace Eigen;
 using Point = Eigen::Vector3f;
 using Normal = Eigen::Vector3f;
 // using UVMap = Eigen::Vector2f;
-using Face = std::vector<size_t>;
+using Face = std::vector<uint32_t>;
 using Points = std::vector<Point>;
-using IndexList = std::vector<size_t>;
+using IndexList = std::vector<uint32_t>;
 
 std::ostream& operator<<(std::ostream& os, const Point& point)
 {
@@ -167,18 +167,17 @@ struct EqualKey {
 using GridColor = std::unordered_map<GridKey, Color>;
 using GridDensity = std::unordered_map<GridKey, float>;
 using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
-using ClusterIndex = std::vector<IndexList>;
 
-struct BoundingBox {
-    BoundingBox() { }
+struct AABB {
+    AABB() { }
 
-    BoundingBox(const Points V)
+    AABB(const Points V)
     {
         for (Point p : V)
             update(p);
     }
 
-    BoundingBox(const Point& a, const Point& b)
+    AABB(const Point& a, const Point& b)
         : min { a }
         , max { b }
     {
@@ -198,7 +197,7 @@ struct BoundingBox {
 
     Point diag() { return max - min; }
 
-    void voxel(size_t N)
+    void voxel(uint32_t N)
     {
         step = diag().maxCoeff() / N;
         Eigen::Vector3f f = diag() / step;
@@ -217,15 +216,15 @@ struct BoundingBox {
 
     Point center() { return 0.5f * (max + min); }
 
-    BoundingBox intersection(const BoundingBox& other)
+    AABB intersection(const AABB& other)
     {
-        BoundingBox result = *this;
+        AABB result = *this;
         result.min = result.min.cwiseMax(other.min);
         result.max = result.max.cwiseMin(other.max);
         return result;
     }
 
-    bool intersects(const BoundingBox& other) { return !intersection(other).is_empty(); }
+    bool intersects(const AABB& other) { return !intersection(other).is_empty(); }
 
     bool is_empty() const { return (max.array() < min.array()).any(); }
 
@@ -235,7 +234,7 @@ struct BoundingBox {
             && p.z() >= min.z() && p.z() <= max.z();
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const BoundingBox& bb)
+    friend std::ostream& operator<<(std::ostream& os, const AABB& bb)
     {
         os << "[";
         os << "min=[" << bb.min.x() << "," << bb.min.y() << "," << bb.min.z() << "], ";
@@ -284,7 +283,7 @@ struct Mesh {
 
         for (size_t i = 0; i < mesh.F.size(); i++) {
             os << "f";
-            for (size_t f : mesh.F[i])
+            for (uint32_t f : mesh.F[i])
                 os << " " << f + 1; // face index list start from 1 in obj format
             os << std::endl;
         }
@@ -295,15 +294,17 @@ struct Mesh {
     bool load(const char* filename);
     bool save(const char* filename);
     void snap(float e, float t);
+    Mesh grid_sample(uint32_t N);
+    std::vector<Mesh> fast_segment(uint32_t N, size_t outlier_removed_threshold);
 
-    GridIndex grid_index(size_t N);
-    Mesh grid_mesh(GridIndex gi);
-
-    Mesh remesh(size_t N);
+    Mesh remesh(uint32_t N);
     Mesh simple(float ratio);
-    ClusterIndex segment(float radius);
+
+                Color color = Color {(rand() % 255)/255.0f, (rand() % 255)/255.0f, (rand() % 255)/255.0f}; 
 
 private:
+    GridIndex grid_index(AABB& aabb);
+
     bool loadOBJ(const char* filename);
     bool saveOBJ(const char* filename);
     bool loadPLY(const char* filename);
@@ -314,6 +315,7 @@ public:
     // std::vector<Normal> N;
     std::vector<Face> F;
 };
+using MeshList = std::vector<Mesh>;
 
 // struct Material {
 //     friend std::ostream& operator<<(std::ostream& os, const Material& material)
