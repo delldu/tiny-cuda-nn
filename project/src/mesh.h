@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <algorithm>
 using namespace std;
 
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
@@ -29,12 +30,24 @@ using namespace Eigen;
 #define T_EPISON_10 0.01519f
 #define T_EPISON_15 0.03407f
 
+struct Color;
+struct Mesh;
+struct GridKey;
+struct HashFunc;
+struct EqualKey;
+
 using Point = Eigen::Vector3f;
 using Normal = Eigen::Vector3f;
 // using UVMap = Eigen::Vector2f;
 using Face = std::vector<uint32_t>;
 using Points = std::vector<Point>;
+using Mask = std::vector<bool>;
 using IndexList = std::vector<uint32_t>;
+using MeshList = std::vector<Mesh>;
+using GridColor = std::unordered_map<GridKey, Color>;
+using GridDensity = std::unordered_map<GridKey, float>;
+using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
+
 
 std::ostream& operator<<(std::ostream& os, const Point& point)
 {
@@ -164,9 +177,6 @@ struct EqualKey {
     }
 };
 
-using GridColor = std::unordered_map<GridKey, Color>;
-using GridDensity = std::unordered_map<GridKey, float>;
-using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
 
 struct AABB {
     AABB() { }
@@ -294,13 +304,15 @@ struct Mesh {
     bool load(const char* filename);
     bool save(const char* filename);
     void snap(float e, float t);
-    Mesh grid_sample(uint32_t N);
-    std::vector<Mesh> fast_segment(uint32_t N, size_t outlier_removed_threshold);
+    void clean(Mask mask);
 
-    Mesh remesh(uint32_t N);
+    Mesh grid_sample(uint32_t N);
+    MeshList fast_segment(uint32_t N, size_t outliers_threshold);
+    void merge(MeshList cluster);
+
+    Mesh grid_mesh(uint32_t N);
     Mesh simple(float ratio);
 
-                Color color = Color {(rand() % 255)/255.0f, (rand() % 255)/255.0f, (rand() % 255)/255.0f}; 
 
 private:
     GridIndex grid_index(AABB& aabb);
@@ -315,7 +327,6 @@ public:
     // std::vector<Normal> N;
     std::vector<Face> F;
 };
-using MeshList = std::vector<Mesh>;
 
 // struct Material {
 //     friend std::ostream& operator<<(std::ostream& os, const Material& material)

@@ -122,12 +122,15 @@ void test_plane()
     // mesh.snap(D_EPISON, T_EPISON_15);
     // Mesh gmesh = mesh.grid_sample(256);
     // gmesh.save("/tmp/test_256.obj");
-    MeshList cluster = mesh.fast_segment(256, 0);
+    MeshList cluster = mesh.fast_segment(512, 100);
     for (size_t i = 0; i < cluster.size(); i++) {
         std::cout << "Cluster " << i << " ... " << std::endl;
         cluster[i].dump();
     }
-    mesh.save("/tmp/test_32.obj");
+
+    Mesh outmesh;
+    outmesh.merge(cluster);
+    outmesh.save("/tmp/test_32.obj");
 
     // AABB aabb(mesh.V);
     // aabb.voxel(512);
@@ -295,7 +298,7 @@ bool Mesh::loadPLY(const char* filename)
         }
 
         try {
-            colors = file.request_properties_from_element("vertex", { "r", "g", "b", "a" });
+            colors = file.request_properties_from_element("vertex", { "r", "g", "b"});
         } catch (const std::exception& e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */
             ;
         }
@@ -325,10 +328,17 @@ bool Mesh::loadPLY(const char* filename)
             V.resize(vertices->count);
             std::memcpy(V.data()->data(), vertices->buffer.get(), vertices->buffer.size_bytes());
         }
-        if (colors && (colors->t == tinyply::Type::UINT8 || colors->t == tinyply::Type::INT8)) {
-            uint8_t* p = (uint8_t*)colors->buffer.get();
-            for (size_t i = 0; i < colors->count; i++, p += 3)
-                C.push_back(Color { (float)p[0] / 255.0f, (float)p[1] / 255.0f, (float)p[2] / 255.0f });
+        if (colors) {
+            if (colors->t == tinyply::Type::UINT8 || colors->t == tinyply::Type::INT8) {
+                uint8_t* p = (uint8_t*)colors->buffer.get();
+                for (size_t i = 0; i < colors->count; i++, p += 3)
+                    C.push_back(Color { (float)p[0] / 255.0f, (float)p[1] / 255.0f, (float)p[2] / 255.0f });
+            }
+            if (colors->t == tinyply::Type::FLOAT32) {
+                float* p = (float*)colors->buffer.get();
+                for (size_t i = 0; i < colors->count; i++, p += 3)
+                    C.push_back(Color { p[0], p[1], p[2] });
+            }
         }
 
         if (faces && (faces->t == tinyply::Type::INT32 || faces->t == tinyply::Type::INT32)) {
@@ -375,6 +385,55 @@ bool Mesh::save(const char* filename)
     }
 
     return saveOBJ(filename);
+}
+
+
+void Mesh::clean(Mask mask)
+{
+    // 1) Make sure all mask is valid
+    for (size_t i = mask.size(); i < V.size(); i++)
+        mask.push_back(true);
+
+    // 2) Remove bad faces
+    for (Face f:F) {
+        auto it = f.begin();
+        while (it != f.end()) {
+             // face index >= V.size() or index is not valid
+            if (*it >= V.size() || ! mask[*it]) {
+                it = f.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    auto it = F.begin();
+    while (it != F.end()) {
+        if (it->size() < 3) { // Face size must be >= 3
+            it = F.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // 3) Remap face index
+    size_t offset = 0;
+    std::unordered_map<size_t, size_t> new_face_index;
+    for (size_t i = 0; i < V.size(); i++) {
+        if (mask[i])
+            new_face_index[i] = offset++;
+    }
+    for (Face f:F) {
+        for (size_t i = 0; i < f.size(); i++)
+            f[i] = new_face_index[f[i]];
+    }
+
+    // 4) Remove unused points
+    std::vector<Point> vertex;
+    for (size_t i = 0; i < V.size(); i++) {
+        if (mask[i])
+            vertex.push_back(V[i]);
+    }
+    V = vertex;
 }
 
 GridIndex Mesh::grid_index(AABB& aabb)
@@ -454,7 +513,7 @@ Mesh Mesh::grid_sample(uint32_t N)
     return outmesh;
 }
 
-Mesh Mesh::remesh(uint32_t N)
+Mesh Mesh::grid_mesh(uint32_t N)
 {
     Mesh new_mesh;
     // GridIndex gi = grid_index(N);
@@ -487,7 +546,7 @@ bool IndexLabelSort(const IndexLabel& p0, const IndexLabel& p1)
     return p0.label < p1.label;
 }
 
-std::vector<Mesh> Mesh::fast_segment(uint32_t N, size_t outlier_removed_threshold)
+MeshList Mesh::fast_segment(uint32_t N, size_t outliers_threshold)
 {
     AABB aabb(V);
     aabb.voxel(N);
@@ -552,62 +611,94 @@ std::vector<Mesh> Mesh::fast_segment(uint32_t N, size_t outlier_removed_threshol
     auto cluster_logger = tlog::Logger("Segment cluster ...");
     progress = cluster_logger.progress(V.size());
 
-    // Sort index_labels
-    std::vector<IndexLabel> index_labels;
-    index_labels.resize(V.size());
+    // Sort index_label_map
+    std::vector<IndexLabel> index_label_map;
+    index_label_map.resize(V.size());
     IndexLabel temp_index_label;
     for (size_t i = 0; i < V.size(); i++) {
         temp_index_label.index = i;
         temp_index_label.label = labels[i];
-        index_labels[i] = temp_index_label;
+        index_label_map[i] = temp_index_label;
     }
-    sort(index_labels.begin(), index_labels.end(), IndexLabelSort);
+    sort(index_label_map.begin(), index_label_map.end(), IndexLabelSort);
 
     MeshList cluster;
     bool has_color = (V.size() == C.size());
     size_t i, start_index = 0;
-
-    srand(time(NULL)); // for debug
-    for (i = 0; i < index_labels.size(); i++) {
+    for (i = 0; i < index_label_map.size(); i++) {
         progress.update(i);
         // new cluster ?
-        if (index_labels[i].label != index_labels[start_index].label) {
-            // save previous cluster ?
-            if (i - start_index >= outlier_removed_threshold) {
+        if (index_label_map[i].label != index_label_map[start_index].label) {
+            // save previous mesh ?
+            if (i - start_index >= outliers_threshold) {
                 Mesh tmesh;
-                Color color = Color {(rand() % 255)/255.0f, (rand() % 255)/255.0f, (rand() % 255)/255.0f}; // for debug
                 for (size_t j = start_index; j < i; j++) {
-                    tmesh.V.push_back(V[index_labels[j].index]);
-                    if (has_color) {
-                        tmesh.C.push_back(C[index_labels[j].index]);
-                        C[index_labels[j].index] = color; // for debug
-                    } else {
-                        C.push_back(color);
-                    }
+                    tmesh.V.push_back(V[index_label_map[j].index]);
+                    if (has_color)
+                        tmesh.C.push_back(C[index_label_map[j].index]);
                 }
                 cluster.push_back(tmesh);
             }
             start_index = i;
         }
     }
+
     // last cluster ?
-    if ((i - start_index) >= outlier_removed_threshold) {
+    if ((i - start_index) >= outliers_threshold) {
         Mesh tmesh;
-        Color color = Color {(rand() % 255)/255.0f, (rand() % 255)/255.0f, (rand() % 255)/255.0f}; // debug
         for (size_t j = start_index; j < i; j++) {
-            tmesh.V.push_back(V[index_labels[j].index]);
-            if (has_color) {
-                tmesh.C.push_back(C[index_labels[j].index]);
-                C[index_labels[j].index] = color; // debug
-            } else {
-                C.push_back(color);
-            }
+            tmesh.V.push_back(V[index_label_map[j].index]);
+            if (has_color)
+                tmesh.C.push_back(C[index_label_map[j].index]);
         }
         cluster.push_back(tmesh);
     }
     cluster_logger.success("OK !");
 
+    std::cout << "fast_segment has color ?" << has_color << std::endl;
+
     return cluster;
+}
+
+void Mesh::merge(MeshList cluster)
+{
+    static Color fake_colors[8] = {
+        Color{120/255.0f, 120/255.0f, 120/255.0f},
+        Color{180/255.0f, 120/255.0f, 120/255.0f},
+        Color{6/255.0f, 230/255.0f, 230/255.0f},
+        Color{80/255.0f, 50, 50/255.0f},
+        Color{4/255.0f, 200/255.0f, 3/255.0f},
+        Color{120/255.0f, 120/255.0f, 80/255.0f},
+        Color{140/255.0f, 140/255.0f, 140/255.0f},
+        Color{204/255.0f, 5/255.0f, 255/255.0f},
+    };
+
+    int count = 0;
+    size_t offset = V.size();
+
+    auto merge_logger = tlog::Logger("Merge ...");
+    auto progress = merge_logger.progress(cluster.size());
+    for (Mesh m:cluster) {
+        progress.update(count + 1);
+
+        for (Point p:m.V)
+            V.push_back(p);
+
+        for (Face f:m.F) {
+            Face new_face;
+            for (size_t fi:f)
+                new_face.push_back(fi + offset);
+            F.push_back(new_face);
+        }
+        Color fake_color = fake_colors[count % 8];
+        for (size_t i = 0; i < m.V.size(); i++)
+            C.push_back(fake_color);
+
+        count++;
+        offset += m.V.size();
+    }
+
+    merge_logger.success("OK !");
 }
 
 
