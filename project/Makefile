@@ -30,7 +30,8 @@ LIBRARIES := \
 SOURCE := main.cpp \
 	../dependencies/stbi/stbi_wrapper.cpp \
 	src/points.cu \
-	src/mesh.cpp
+	src/mesh.cpp \
+	src/simplify.cpp
 
 APPLETS := $(shell ./makebox --source)
 SOURCE += $(APPLETS)

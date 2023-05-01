@@ -9,6 +9,13 @@
 #include "mesh.h"
 #include "nanoflann.hpp"
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tinyobj.h"
+
+#define TINYPLY_IMPLEMENTATION
+#include "tinyply.h"
+
+
 struct PlaneNormals {
     using coord_t = float; //!< The type of each coordinate
 
@@ -116,21 +123,26 @@ void test_plane()
     Mesh mesh;
 
     // mesh.savePLY("empty.ply");
-    // mesh.load("lego/mesh.obj");
-    mesh.load("lego/002.ply");
-    mesh.dump();
-    // mesh.snap(D_EPISON, T_EPISON_15);
-    // Mesh gmesh = mesh.grid_sample(256);
-    // gmesh.save("/tmp/test_256.obj");
-    MeshList cluster = mesh.fast_segment(512, 100);
-    for (size_t i = 0; i < cluster.size(); i++) {
-        std::cout << "Cluster " << i << " ... " << std::endl;
-        cluster[i].dump();
-    }
+    // mesh.load("lego/simple.obj");
 
-    Mesh outmesh;
-    outmesh.merge(cluster);
-    outmesh.save("/tmp/test_32.obj");
+    mesh.load("/tmp/horse.obj");
+    mesh.simplify(0.1);
+
+    // mesh.load("lego/002.ply");
+    // mesh.dump();
+    // // mesh.snap(D_EPISON, T_EPISON_15);
+    // // Mesh gmesh = mesh.grid_sample(256);
+    // // gmesh.save("/tmp/test_256.obj");
+    // MeshList cluster = mesh.fast_segment(512, 100);
+    // for (size_t i = 0; i < cluster.size(); i++) {
+    //     std::cout << "Cluster " << i << " ... " << std::endl;
+    //     cluster[i].dump();
+    // }
+
+    // Mesh outmesh;
+    // outmesh.merge(cluster);
+    // outmesh.save("/tmp/test_32.obj");
+
 
     // AABB aabb(mesh.V);
     // aabb.voxel(512);
@@ -171,6 +183,7 @@ void test_plane()
     //     std::cout << d.first << " -- " << d.second << std::endl;
     // }
 }
+
 
 bool Mesh::loadOBJ(const char* filename)
 {
@@ -525,16 +538,6 @@ Mesh Mesh::grid_mesh(uint32_t N)
     return new_mesh;
 }
 
-Mesh Mesh::simple(float ratio)
-{
-    Mesh new_mesh;
-
-    if (ratio > 0.0f && ratio < 1.0f) {
-        new_mesh.F.clear();
-    }
-
-    return new_mesh;
-}
 
 struct IndexLabel {
     size_t index;

@@ -18,11 +18,6 @@ using namespace Eigen;
 
 #include "tinylog.h"
 
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tinyobj.h"
-
-#define TINYPLY_IMPLEMENTATION
-#include "tinyply.h"
 
 #define D_EPISON 1.0e-03 // distance epision
 // 1.0 - math.cos(10.0/180.0 * 3.1415926) -- 0.01519
@@ -37,10 +32,14 @@ struct HashFunc;
 struct EqualKey;
 
 using Point = Eigen::Vector3f;
+// using Edge = std::pair<uint32_t, uint32_t>;
+
+
+using Face = std::vector<uint32_t>;
+
+using Points = std::vector<Point>;
 using Normal = Eigen::Vector3f;
 // using UVMap = Eigen::Vector2f;
-using Face = std::vector<uint32_t>;
-using Points = std::vector<Point>;
 using Mask = std::vector<bool>;
 using IndexList = std::vector<uint32_t>;
 using MeshList = std::vector<Mesh>;
@@ -49,11 +48,11 @@ using GridDensity = std::unordered_map<GridKey, float>;
 using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
 
 
-std::ostream& operator<<(std::ostream& os, const Point& point)
-{
-    os << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
-    return os;
-}
+// std::ostream& operator<<(std::ostream& os, const Point& point)
+// {
+//     os << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
+//     return os;
+// }
 
 struct Plane {
     Plane(Point o, Normal n)
@@ -311,7 +310,7 @@ struct Mesh {
     void merge(MeshList cluster);
 
     Mesh grid_mesh(uint32_t N);
-    Mesh simple(float ratio);
+    void simplify(float ratio); // quadratic error metrics (QEM) ?
 
 
 private:
