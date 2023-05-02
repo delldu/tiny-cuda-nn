@@ -1,13 +1,14 @@
 #include "mesh.h"
-#include<queue>
+#include <queue>
 
 struct EdgeCost;
 using MinHeap = std::priority_queue<EdgeCost>;
 
-
 struct Edge {
-    Edge(size_t p1, size_t p2): p1(p1), p2(p2) {
-
+    Edge(size_t p1, size_t p2)
+        : p1(p1)
+        , p2(p2)
+    {
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Edge& e)
@@ -16,26 +17,33 @@ struct Edge {
         return os;
     }
 
-	bool operator< (const Edge& e) const  {
-		if (p1 != e.p1)
-			return p1 < e.p1;
-		// ==> p1 == e.p1
-		return p2 < e.p2;
-	}
+    bool operator<(const Edge& e) const
+    {
+        if (p1 != e.p1)
+            return p1 < e.p1;
+        // ==> p1 == e.p1
+        return p2 < e.p2;
+    }
 
     size_t p1, p2;
 };
 
 struct Triangle {
-    Triangle(size_t i1, size_t i2, size_t i3) {
+    Triangle(size_t i1, size_t i2, size_t i3)
+    {
         // size_t v[3] = {i1, i2, i3};
         size_t v[3];
-        v[0] = i1; v[1] = i2; v[2] = i3;
+        v[0] = i1;
+        v[1] = i2;
+        v[2] = i3;
         std::sort(v, v + 3);
-        p1 = v[0]; p2 = v[1]; p3 = v[2];
+        p1 = v[0];
+        p2 = v[1];
+        p3 = v[2];
     }
 
-    bool valid() {
+    bool valid()
+    {
         return p1 < p2 && p2 < p3;
     }
 
@@ -51,124 +59,154 @@ struct Triangle {
 };
 
 struct EdgeCost {
-	EdgeCost(Edge e, float c): edge(e), cost(c) {
-	}
+    EdgeCost(Edge e, float c, Point v)
+        : edge(e)
+        , cost(c)
+        , best(v)
+    {
+    	; // e.p1 --> best, e.p2 --> best
+    }
 
-    bool operator <(const EdgeCost &ec) const {
-    	return ec.cost < cost;
+    bool operator<(const EdgeCost& ec) const
+    {
+        return ec.cost < cost;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const EdgeCost& ec)
     {
-        os << std::fixed << ec.edge << ",  Cost: " << ec.cost;
+        os << std::fixed << ec.edge << ",  Cost: " << ec.cost << ", Best Point:" << ec.best;
         return os;
     }
 
-Edge edge;
-float cost;
+    Edge edge;
+    float cost;
+    Point best;
 };
-
-
 
 void Mesh::simplify(float ratio)
 {
-	MinHeap ec_heap;
+    MinHeap ec_heap;
 
-	std::set<Edge> edges; // for query edge
-	std::unordered_map<size_t, std::set<size_t>> v_edges; // v, point ...
-	std::unordered_map<size_t, std::set<Edge>> v_triangles; // v, (e.p1, e.p2) ...
+    std::set<Edge> edges; // for query edge
+    std::unordered_map<size_t, std::set<size_t>> v_edges; // all edges start from point v ...
+    std::unordered_map<size_t, std::set<Edge>> v_triangles; // all faces start from point v
+
+    // cost = x.t * Q * x
+    std::unordered_map<size_t, Eigen::Matrix4f> v_qmatrixs; // QMatrix for point v which has adjacent face
+
+    size_t target = (size_t)(F.size() * ratio);
+    AABB aabb(V);
+    float threshold = aabb.diag().maxCoeff();
+
+    auto edgeLength = [&](const Edge& e) {
+        return (V[e.p1] - V[e.p2]).norm();
+    };
+
+    auto moveCost = [](const Eigen::Matrix4f& Q, const Point &v) {
+    	Eigen::Vector4f x = Vector4f {v.x(), v.y(), v.z(), 1.0f};
+    	return x.transpose()*Q*x;
+    };
+
+    auto solveEquation = [&](const Eigen::Matrix4f& Q, const Point &init_point) -> Point {
+    	Eigen::Matrix3f A = Q.block(0, 0, 3, 3); // 3x3
+    	if (fabsf(A.determinant()) < 0.000001f)
+    		return init_point;
+
+    	Eigen::Vector3f b = Vector3f{- Q(0, 3), -Q(1, 3), Q(2, 3)};
+	    return A.colPivHouseholderQr().solve(b);
+    };
+
+    auto buildHeap = [&]() {
+        while (!ec_heap.empty())
+            ec_heap.pop();
+
+        for (Face f : F) {
+            if (f.size() != 3) {
+                tlog::error() << "Face size: " << f.size() << " is not 3 !!!";
+                continue;
+            }
+            Triangle t { f[0], f[1], f[2] };
+            if (!t.valid()) {
+                tlog::error() << "Triangle is not valid";
+                continue;
+            }
+
+            edges.insert(Edge { t.p2, t.p3 });
+            edges.insert(Edge { t.p1, t.p3 });
+            edges.insert(Edge { t.p1, t.p2 });
+
+            v_triangles[t.p1].insert(Edge { t.p2, t.p3 });
+            v_triangles[t.p2].insert(Edge { t.p1, t.p3 });
+            v_triangles[t.p3].insert(Edge { t.p1, t.p2 });
+
+            v_edges[t.p1].insert(t.p2);
+            v_edges[t.p1].insert(t.p3);
+            v_edges[t.p2].insert(t.p1);
+            v_edges[t.p2].insert(t.p3);
+            v_edges[t.p3].insert(t.p1);
+            v_edges[t.p3].insert(t.p2);
+
+            v_qmatrixs[t.p1] = Eigen::Matrix4f::Zero();
+            v_qmatrixs[t.p2] = Eigen::Matrix4f::Zero();
+            v_qmatrixs[t.p3] = Eigen::Matrix4f::Zero();
+        }
+
+        for (auto n:v_triangles) {
+        	size_t p = n.first;
+        	for (const Edge& e:n.second) {
+	        	Plane plane {V[p], V[e.p1], V[e.p2]};
+	        	Eigen::Vector4f abcd{plane.n.x(), plane.n.y(), plane.n.z(), -plane.n.dot(plane.o)};
+	        	v_qmatrixs[p] += abcd * abcd.transpose();
+	        	// std::cout << v_qmatrixs[p] << std::endl;
+        	}
+        }
+
+        for (const Edge &e : edges) {
+        	if (edgeLength(e) >= threshold)
+        		continue;
+
+        	Eigen::Matrix4f Q = v_qmatrixs[e.p1] + v_qmatrixs[e.p2];
+        	Point init_point = (V[e.p1] + V[e.p2])/2.0;
+			Point best_point = solveEquation(Q, init_point);
+
+	    	// limit strange triangle
+	        if ((best_point - V[e.p1]).norm() + (best_point - V[e.p2]).norm() > 2.0 * (V[e.p1] - V[e.p2]).norm())
+	            best_point = init_point;
+
+			float cost = moveCost(Q, best_point);
+			ec_heap.push(EdgeCost{e, cost, best_point});
+        }
+    };
 
 
-	size_t target = (size_t)(F.size() * ratio);
-	AABB aabb(V);
-	float threshold = aabb.diag().maxCoeff();
+    auto removeEdge = [&](const Edge &edge, const Point &best) {
+		// for (Edge face_edge : v_triangles[e.p1]) {
+		// 	// if edge link to face edge, we must reserve this face !!!
+		// 	if (face_edge.p1 == edge.p2 || face_edge.p2 == edge.p2)
+		// 		continue;
 
-	auto edgeLength = [&](const Edge &e) -> float {
-		return sqrtf((V[e.p1] - V[e.p2]).dot(V[e.p1] - V[e.p2]));
-	};
-
-	auto dump_edges = [&]() {
-    	for (Edge e : edges)
-    		std::cout << e << std::endl;
-	};
-
-	auto buildHeap = [&]() {
-		while(! ec_heap.empty())
-			ec_heap.pop();
-
-		for (Face f:F) {
-			if (f.size() != 3) {
-				tlog::error() << "Face size: " << f.size() << " is not 3 !!!";
-				continue;
-			}
-			Triangle t{f[0], f[1], f[2]};
-			if (! t.valid()) {
-				tlog::error() << "Triangle is not valid";
-				continue;
-			}
-
-			edges.insert(Edge{t.p2, t.p3});
-			edges.insert(Edge{t.p1, t.p3});
-			edges.insert(Edge{t.p1, t.p2});
-
-			v_triangles[t.p1].insert(Edge{t.p2, t.p3});
-			v_triangles[t.p2].insert(Edge{t.p1, t.p3});
-			v_triangles[t.p3].insert(Edge{t.p1, t.p2});
-
-			v_edges[t.p1].insert(t.p2);
-			v_edges[t.p1].insert(t.p3);
-			v_edges[t.p2].insert(t.p1);
-			v_edges[t.p2].insert(t.p3);
-			v_edges[t.p3].insert(t.p1);
-			v_edges[t.p3].insert(t.p2);
-		}
-
-		// Dump Edge ...
-		dump_edges();
-
-
-		// if (edgeLength(e) < threshold) {
-
+		// 	// edge.p1/best, face_edge.p1, face_edge.p2 ==> Triangle
+		// 	Normal n1 = (V[face_edge.p1] - V[edge.p1]).cross(V[face_edge.p2] - V[edge.p1]);
+		// 	Normal n2 = (V[face_edge.p1] - best).cross(V[face_edge.p2] - best]);
+		// 	if (n1.dot(n2) < 0) // face folder ? skip !!!
+		// 		continue;
 		// }
+		V[edge.p1] = best;
+		V[edge.p2] = best;
+    };
 
-	    // for (const auto& e : edge) {
-	    //     addToHeap(e, threshold);
-	    // }
-	};
+    buildHeap();
+    size_t fall = F.size();
+    while(fall > target && ! ec_heap.empty()) {
+    	// select Edge
+    	EdgeCost ec = ec_heap.top();
+    	ec_heap.pop();
 
-	auto solveEquation = []() {
-		; // find best v
-	};
-
-	auto getPosition = [&]() {
-		solveEquation();
-	};
-
-	auto selectEdge = [&]() {
-		while(true) {
-			getPosition();
-			break;
-		}
-	};
-
-	auto faceReverse = []() {
-		; // what's up ?
-	};
-
-
-	auto removeEdge = [&]() {
-		faceReverse();
-	};
-
-
-	buildHeap();
-	// while(F.size() > target) {
-	// 	selectEdge();
-	// 	removeEdge();
-	// }
+    	std::cout << ec << std::endl;
+     	removeEdge(ec.edge, ec.best);
+     	fall--;
+    }
 }
-
-
 
 // std::pair<Vector, double> getPosition(const Edge& e)
 // {
@@ -268,7 +306,7 @@ void Mesh::simplify(float ratio)
 //         auto reverse = faceReverse(f, vertex[e.first], v);
 //         if (!reverse)
 //             continue;
-        
+
 //         toRev.push_back(f);
 //         assert(face[f.second].find(make_pair(e.first, f.first)) != face[f.second].end());
 //         face[f.second].erase(make_pair(e.first, f.first));

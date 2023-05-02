@@ -126,10 +126,11 @@ void test_plane()
     // mesh.load("lego/simple.obj");
 
     mesh.load("/tmp/horse.obj");
-    mesh.simplify(0.1);
+    mesh.dump();
+    mesh.simplify(0.5);
+    mesh.save("/tmp/test.obj");
 
     // mesh.load("lego/002.ply");
-    // mesh.dump();
     // // mesh.snap(D_EPISON, T_EPISON_15);
     // // Mesh gmesh = mesh.grid_sample(256);
     // // gmesh.save("/tmp/test_256.obj");

@@ -66,7 +66,7 @@ struct Plane {
     {
         o = (p1 + p2 + p3) / 3.0f;
         n = (p2 - p1).cross(p3 - p1);
-        n = n.normalized();
+        n.normalize();
     }
 
     // p on plane ?
@@ -109,7 +109,7 @@ struct Plane {
             o.y() = x[1];
             o.z() = b.colwise().mean().x();
 
-            n = n.normalized();
+            n.normalize();
         }
     }
 
