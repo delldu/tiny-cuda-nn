@@ -125,9 +125,9 @@ void test_plane()
     // mesh.savePLY("empty.ply");
     // mesh.load("lego/simple.obj");
 
-    mesh.load("/tmp/horse.obj");
+    mesh.load("/tmp/simple.obj");
     mesh.dump();
-    mesh.simplify(0.5);
+    mesh.simplify(0.1);
     mesh.save("/tmp/test.obj");
 
     // mesh.load("lego/002.ply");

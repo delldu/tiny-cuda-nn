@@ -32,13 +32,12 @@ struct HashFunc;
 struct EqualKey;
 
 using Point = Eigen::Vector3f;
-// using Edge = std::pair<uint32_t, uint32_t>;
-
-
-using Face = std::vector<uint32_t>;
-
 using Points = std::vector<Point>;
+using Colors = std::vector<Color>;
+using Face = std::vector<uint32_t>;
+using Faces = std::vector<Face>;
 using Normal = Eigen::Vector3f;
+using Normals = std::vector<Normal>;
 // using UVMap = Eigen::Vector2f;
 using Mask = std::vector<bool>;
 using IndexList = std::vector<uint32_t>;
@@ -321,10 +320,10 @@ private:
     bool loadPLY(const char* filename);
 
 public:
-    std::vector<Point> V;
-    std::vector<Color> C;
-    // std::vector<Normal> N;
-    std::vector<Face> F;
+    Points V;
+    Colors C;
+    // Normals N;
+    Faces F;
 };
 
 // struct Material {
