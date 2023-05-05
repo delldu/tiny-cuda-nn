@@ -15,7 +15,6 @@
 #define TINYPLY_IMPLEMENTATION
 #include "tinyply.h"
 
-
 struct PlaneNormals {
     using coord_t = float; //!< The type of each coordinate
 
@@ -51,9 +50,8 @@ public:
     std::vector<Normal> data;
 };
 
-struct PointCloud
-{
-    using coord_t = float;  //!< The type of each point
+struct PointCloud {
+    using coord_t = float; //!< The type of each point
 
     // Must return the number of points
     inline size_t kdtree_get_point_count() const { return data.size(); }
@@ -86,105 +84,12 @@ public:
 
 void test_plane()
 {
-    // Points points;
-
-    // Point p1 = Point { 0.0, 0.0, 0.0 };
-    // Point p2 = Point { 1.0, 0.0, 0.0 };
-    // Point p3 = Point { 0.0, 2.0, 0.0 };
-    // Point p4 = Point { 0.0, 0.0, 3.0 };
-
-    // points.push_back(p1);
-    // points.push_back(p2);
-    // points.push_back(p3);
-    // // points.push_back(Eigen::Vector3f{0.01, 0.01, 0.01});
-
-    // Plane plane(points);
-    // std::cout << plane << std::endl;
-
-    // Point p = Point { 0.000001, 0.000001, 0.000001 };
-    // std::cout << p << " on plane (epision = default) ? " << plane.contains(p) << std::endl;
-    // std::cout << p << " on plane (epision = 0.1f)? " << plane.contains(p, 0.1f) << std::endl;
-
-    // AABB aabb;
-    // aabb.update(p1);
-    // aabb.update(p2);
-    // aabb.update(p3);
-    // aabb.update(p4);
-    // aabb.voxel(100);
-    // std::cout << "aabb:" << aabb << std::endl;
-    // std::cout << "aabb dim:" << aabb.dim << std::endl;
-
-    // Plane B(plane.o - Point { D_EPISON / 2.0, D_EPISON / 2.0, D_EPISON / 2.0 },
-    //     plane.n + Point { D_EPISON / 2.0, D_EPISON / 2.0, D_EPISON / 2.0 });
-
-    // std::cout << B << std::endl;
-    // std::cout << "Plane coincide with B ?" << plane.coincide(B) << std::endl;
-
     Mesh mesh;
-
-    // mesh.savePLY("empty.ply");
-    // mesh.load("lego/simple.obj");
-
-    mesh.load("/tmp/horse.obj");
+    mesh.load("/tmp/dragon.obj");
     mesh.dump();
-    mesh.simplify(0.5);
+    mesh.simplify(0.1);
     mesh.save("/tmp/test1.obj");
-
-    // mesh.load("lego/002.ply");
-    // // mesh.snap(D_EPISON, T_EPISON_15);
-    // // Mesh gmesh = mesh.grid_sample(256);
-    // // gmesh.save("/tmp/test_256.obj");
-    // MeshList cluster = mesh.fast_segment(512, 100);
-    // for (size_t i = 0; i < cluster.size(); i++) {
-    //     std::cout << "Cluster " << i << " ... " << std::endl;
-    //     cluster[i].dump();
-    // }
-
-    // Mesh outmesh;
-    // outmesh.merge(cluster);
-    // outmesh.save("/tmp/test_32.obj");
-
-
-    // AABB aabb(mesh.V);
-    // aabb.voxel(512);
-    // std::cout << "aabb(V):" << aabb << std::endl;
-
-    // Mesh outmesh = mesh.grid(1024);
-    // outmesh.saveOBJ("grid.obj");
-
-    // mesh.snap(0.05f, 2*T_EPISON_10);
-    // mesh.saveOBJ("snap.obj");
-
-    // Material material;
-    // material.save("test.mtl");
-
-    // GridDensity grid_density;
-    // GridColor grid_color;
-
-    // grid_density[grid_key(0, 0, 0)] = 1.0f;
-    // grid_density[grid_key(100, 100, 100)] = 2.0f;
-    // grid_density[grid_key(101, 201, 301)] = 3.0f;
-
-    // grid_color[grid_key(0, 0, 0)] = Color{1.0, 0.0, 0.0};
-    // grid_color[grid_key(100, 100, 100)] = Color{0.0, 1.0, 0.0};
-    // grid_color[grid_key(101, 201, 301)] = Color{0.0, 0.0, 1.0};
-
-    // std::cout << std::fixed;
-
-    // if (grid_density.find(grid_key(101, 201, 301)) == grid_density.end())
-    //     std::cout << "not found 101" << std::endl;
-    // else
-    //     std::cout << "found 101" << std::endl;
-
-    // for (auto d:grid_density) {
-    //     std::cout << d.first << " -- " << d.second << std::endl;
-    // }
-
-    // for (auto d:grid_color) {
-    //     std::cout << d.first << " -- " << d.second << std::endl;
-    // }
 }
-
 
 bool Mesh::loadOBJ(const char* filename)
 {
@@ -312,7 +217,7 @@ bool Mesh::loadPLY(const char* filename)
         }
 
         try {
-            colors = file.request_properties_from_element("vertex", { "r", "g", "b"});
+            colors = file.request_properties_from_element("vertex", { "r", "g", "b" });
         } catch (const std::exception& e) { /* std::cerr << "tinyply exception: " << e.what() << std::endl */
             ;
         }
@@ -401,7 +306,6 @@ bool Mesh::save(const char* filename)
     return saveOBJ(filename);
 }
 
-
 void Mesh::clean(Mask mask)
 {
     // 1) Make sure all mask is valid
@@ -409,11 +313,11 @@ void Mesh::clean(Mask mask)
         mask.push_back(true);
 
     // 2) Remove bad faces
-    for (Face f:F) {
+    for (Face f : F) {
         auto it = f.begin();
         while (it != f.end()) {
-             // face index >= V.size() or index is not valid
-            if (*it >= V.size() || ! mask[*it]) {
+            // face index >= V.size() or index is not valid
+            if (*it >= V.size() || !mask[*it]) {
                 it = f.erase(it);
             } else {
                 ++it;
@@ -436,7 +340,7 @@ void Mesh::clean(Mask mask)
         if (mask[i])
             new_face_index[i] = offset++;
     }
-    for (Face f:F) {
+    for (Face f : F) {
         for (size_t i = 0; i < f.size(); i++)
             f[i] = new_face_index[f[i]];
     }
@@ -539,7 +443,6 @@ Mesh Mesh::grid_mesh(uint32_t N)
     return new_mesh;
 }
 
-
 struct IndexLabel {
     size_t index;
     int label;
@@ -557,14 +460,14 @@ MeshList Mesh::fast_segment(uint32_t N, size_t outliers_threshold)
     float d_threshold = aabb.step;
 
     PointCloud pc;
-    for (Point point:V)
+    for (Point point : V)
         pc.data.push_back(point);
 
     float query_point[3];
     using pc_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<
         nanoflann::L2_Simple_Adaptor<float, PointCloud>,
         PointCloud, 3 /* dim */>;
-    pc_kd_tree_t index(3 /*dim*/, pc, {10 /* max leaf */});
+    pc_kd_tree_t index(3 /*dim*/, pc, { 10 /* max leaf */ });
 
     float squaredRadius = d_threshold * d_threshold;
     std::vector<nanoflann::ResultItem<size_t, float>> ret_indices;
@@ -667,14 +570,14 @@ MeshList Mesh::fast_segment(uint32_t N, size_t outliers_threshold)
 void Mesh::merge(MeshList cluster)
 {
     static Color fake_colors[8] = {
-        Color{120/255.0f, 120/255.0f, 120/255.0f},
-        Color{180/255.0f, 120/255.0f, 120/255.0f},
-        Color{6/255.0f, 230/255.0f, 230/255.0f},
-        Color{80/255.0f, 50, 50/255.0f},
-        Color{4/255.0f, 200/255.0f, 3/255.0f},
-        Color{120/255.0f, 120/255.0f, 80/255.0f},
-        Color{140/255.0f, 140/255.0f, 140/255.0f},
-        Color{204/255.0f, 5/255.0f, 255/255.0f},
+        Color { 120 / 255.0f, 120 / 255.0f, 120 / 255.0f },
+        Color { 180 / 255.0f, 120 / 255.0f, 120 / 255.0f },
+        Color { 6 / 255.0f, 230 / 255.0f, 230 / 255.0f },
+        Color { 80 / 255.0f, 50, 50 / 255.0f },
+        Color { 4 / 255.0f, 200 / 255.0f, 3 / 255.0f },
+        Color { 120 / 255.0f, 120 / 255.0f, 80 / 255.0f },
+        Color { 140 / 255.0f, 140 / 255.0f, 140 / 255.0f },
+        Color { 204 / 255.0f, 5 / 255.0f, 255 / 255.0f },
     };
 
     int count = 0;
@@ -682,15 +585,15 @@ void Mesh::merge(MeshList cluster)
 
     auto merge_logger = tlog::Logger("Merge ...");
     auto progress = merge_logger.progress(cluster.size());
-    for (Mesh m:cluster) {
+    for (Mesh m : cluster) {
         progress.update(count + 1);
 
-        for (Point p:m.V)
+        for (Point p : m.V)
             V.push_back(p);
 
-        for (Face f:m.F) {
+        for (Face f : m.F) {
             Face new_face;
-            for (size_t fi:f)
+            for (size_t fi : f)
                 new_face.push_back(fi + offset);
             F.push_back(new_face);
         }
@@ -704,7 +607,6 @@ void Mesh::merge(MeshList cluster)
 
     merge_logger.success("OK !");
 }
-
 
 void Mesh::snap(float e, float t)
 {
@@ -762,7 +664,7 @@ void Mesh::snap(float e, float t)
     std::vector<bool> need_check_planes(planes.size(), true);
     for (size_t i = 0; i < planes.size(); i++) {
         progress.update(i);
-        if (! need_check_planes[i])
+        if (!need_check_planes[i])
             continue;
 
         // do a knn search
@@ -774,7 +676,7 @@ void Mesh::snap(float e, float t)
 
         for (size_t k = 1; k < resultSet.size(); k++) { // skip query point self
             size_t j = ret_index[k];
-            if (! need_check_planes[j] || j <= i)
+            if (!need_check_planes[j] || j <= i)
                 continue;
 
             if (planes[i].coincide(planes[j], e, t)) {

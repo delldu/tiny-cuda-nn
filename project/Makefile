@@ -8,7 +8,7 @@ TCNN_INSTALL_DIR ?= ..
 TARGET := meshbox
 
 
-CXXFLAGS := -fPIC -Wall -Wextra
+CXXFLAGS := -fPIC -Wall -Wextra -O3 -fopenmp
 DEFINES := -DTCNN_MIN_GPU_ARCH=70 -std=c++14
 
 INCLUDES  := \
@@ -43,7 +43,7 @@ NVCC := $(CUDA_INSTALL_DIR)/bin/nvcc
 
 # internal flags
 CCFLAGS     :=
-LDFLAGS     := -fPIC -O3
+LDFLAGS     := -fPIC -fopenmp
 
 # Debug build flags
 ifeq ($(dbg),1)
@@ -111,3 +111,5 @@ install:
 clean:
 	rm -f ${OBJECT} ${TARGET}
 
+format:
+	clang-format -i --style=WebKit src/*.cpp src/*.cu src/mesh.h

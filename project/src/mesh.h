@@ -7,17 +7,16 @@
 ************************************************************************************/
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <algorithm>
 using namespace std;
 
 #include <Eigen/Dense> // Version 3.4.9, eigen.tgz under dependencies
 using namespace Eigen;
 
 #include "tinylog.h"
-
 
 #define D_EPISON 1.0e-03 // distance epision
 // 1.0 - math.cos(10.0/180.0 * 3.1415926) -- 0.01519
@@ -46,12 +45,6 @@ using GridColor = std::unordered_map<GridKey, Color>;
 using GridDensity = std::unordered_map<GridKey, float>;
 using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
 
-
-// std::ostream& operator<<(std::ostream& os, const Point& point)
-// {
-//     os << std::fixed << "(" << point.x() << ", " << point.y() << ", " << point.z() << ")";
-//     return os;
-// }
 
 struct Plane {
     Plane(Point o, Normal n)
@@ -174,7 +167,6 @@ struct EqualKey {
         return lhs.i == rhs.i && lhs.j == rhs.j && lhs.k == rhs.k;
     }
 };
-
 
 struct AABB {
     AABB() { }
@@ -310,7 +302,6 @@ struct Mesh {
 
     Mesh grid_mesh(uint32_t N);
     void simplify(float ratio); // quadratic error metrics (QEM) ?
-
 
 private:
     GridIndex grid_index(AABB& aabb);
