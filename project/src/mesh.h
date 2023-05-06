@@ -29,6 +29,7 @@ struct Mesh;
 struct GridKey;
 struct HashFunc;
 struct EqualKey;
+struct Cell;
 
 using Point = Eigen::Vector3f;
 using Points = std::vector<Point>;
@@ -41,9 +42,11 @@ using Normals = std::vector<Normal>;
 using Mask = std::vector<bool>;
 using IndexList = std::vector<uint32_t>;
 using MeshList = std::vector<Mesh>;
-using GridColor = std::unordered_map<GridKey, Color>;
-using GridDensity = std::unordered_map<GridKey, float>;
 using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
+// using GridPoint = std::unordered_map<GridKey, Point, HashFunc, EqualKey>;
+// using GridColor = std::unordered_map<GridKey, Color, HashFunc, EqualKey>;
+// using GridDensity = std::unordered_map<GridKey, float, HashFunc, EqualKey>;
+using GridCell = std::unordered_map<GridKey, Cell, HashFunc, EqualKey>;
 
 
 struct Plane {
@@ -127,6 +130,12 @@ public:
 };
 
 struct Color {
+    Color() {
+    }
+
+    Color(float r, float g, float b):r(r), g(g), b(b) {
+    }
+
     friend std::ostream& operator<<(std::ostream& os, const Color& color)
     {
         os << std::fixed << color.r << " " << color.g << " " << color.b;
@@ -137,7 +146,22 @@ public:
     float r, g, b;
 };
 
+
+struct Cell {
+    Cell() {}
+
+    Cell(Point p, Color c, float d): point(p), color(c), density(d) {
+    }
+
+public:
+    Point point;
+    Color color;
+    float density;
+};
+
 struct GridKey {
+    GridKey() {}
+    
     GridKey(uint32_t f, uint32_t s, uint32_t t)
         : i(f)
         , j(s)
@@ -214,6 +238,9 @@ struct AABB {
         return GridKey { (uint32_t)pos.x(), (uint32_t)pos.y(), (uint32_t)pos.z() };
     }
 
+    Point key_point(GridKey key) { return Point{min.x() + key.i * step, min.y() + key.j * step, min.z() + key.k*step}; }
+
+
     Point center() { return 0.5f * (max + min); }
 
     AABB intersection(const AABB& other)
@@ -249,8 +276,8 @@ struct AABB {
     Point max = Point::Constant(-std::numeric_limits<float>::infinity());
 
     // Helper
-    float step = 1.0;
-    Eigen::Vector3i dim = Vector3i { 1, 1, 1 };
+    float step = 1.0f;
+    Eigen::Matrix<uint32_t, 3, 1> dim {1, 1, 1};
 };
 
 struct Mesh {
@@ -304,7 +331,40 @@ struct Mesh {
     void simplify(float ratio); // quadratic error metrics (QEM) ?
 
 private:
-    GridIndex grid_index(AABB& aabb);
+    GridIndex grid_index(AABB aabb);
+    GridCell grid_cell(const GridIndex &gi);
+    // GridColor grid_color(const GridIndex &gi);
+    // GridDensity grid_density(const GridIndex &gi);
+
+    void emit_triangle(int has_color, float v1[], float v2[], float v3[], float c1[], float c2[], float c3[])
+    {
+        static uint32_t n_triangles = 0;
+        std::cout << "---- n_triangles ---" << n_triangles << std::endl;
+
+        Face new_face;
+
+        Point p1 {v1[0], v1[1], v1[2]};
+        Point p2 {v2[0], v2[1], v2[2]};
+        Point p3 {v3[0], v3[1], v3[2]};
+        V.push_back(p1);
+        V.push_back(p2);
+        V.push_back(p3);
+
+        new_face = Face {n_triangles, n_triangles + 1, n_triangles + 2};
+        F.push_back(new_face);
+
+        if (has_color) {
+            Color color1 {c1[0], c1[1], c1[2]};
+            Color color2 {c2[0], c2[1], c2[2]};
+            Color color3 {c3[0], c3[1], c3[2]};
+            C.push_back(color1);
+            C.push_back(color2);
+            C.push_back(color3);
+        }
+
+        n_triangles += 3;
+    };
+    int cube_mc(int has_color, float cell_point[], float cell_color[], float cell_density[], float borderval);
 
     bool loadOBJ(const char* filename);
     bool saveOBJ(const char* filename);

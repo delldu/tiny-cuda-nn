@@ -15,6 +15,8 @@
 #define TINYPLY_IMPLEMENTATION
 #include "tinyply.h"
 
+#include "marching.h"
+
 struct PlaneNormals {
     using coord_t = float; //!< The type of each coordinate
 
@@ -87,8 +89,13 @@ void test_plane()
     Mesh mesh;
     mesh.load("/tmp/dragon.obj");
     mesh.dump();
-    mesh.simplify(0.1);
-    mesh.save("/tmp/test1.obj");
+    // mesh.simplify(0.1);
+    // mesh.save("/tmp/test1.obj");
+
+    // Mesh outmesh = mesh.grid_sample(256);
+    Mesh outmesh = mesh.grid_mesh(256);
+
+    outmesh.save("/tmp/test1.obj");
 }
 
 bool Mesh::loadOBJ(const char* filename)
@@ -354,7 +361,7 @@ void Mesh::clean(Mask mask)
     V = vertex;
 }
 
-GridIndex Mesh::grid_index(AABB& aabb)
+GridIndex Mesh::grid_index(AABB aabb)
 {
     GridIndex gi;
 
@@ -370,77 +377,235 @@ GridIndex Mesh::grid_index(AABB& aabb)
     return gi;
 }
 
+GridCell Mesh::grid_cell(const GridIndex& gi)
+{
+    GridCell gc;
+    float d, mean_density;
+    float mean = 0.0f;
+    float stdv = 0.0f;
+    bool has_color = (V.size() == C.size());
+
+    for (auto n : gi) {
+        const IndexList& index_list = n.second;
+        d = (float)index_list.size();
+        mean += d;
+        stdv += d * d;
+    }
+    if (gi.size() > 0) {
+        mean /= gi.size();
+        stdv /= gi.size();
+        stdv -= mean;
+        stdv = sqrtf(stdv);
+    }
+    d = mean + 2.0 * stdv + 1.0e-6; // 1/2/3 sigma: 68.27%, 95.45%, 99.73%
+
+    for (auto n : gi) {
+        const GridKey& key = n.first;
+        const IndexList& index_list = n.second;
+        if (index_list.size() < 1)
+            continue;
+
+        Eigen::Vector3f mean_point = Vector3f::Zero();
+        Eigen::Vector3f mean_color = Vector3f::Zero();
+
+        for (size_t i = 0; i < index_list.size(); i++) {
+            mean_point.x() += V[index_list[i]].x();
+            mean_point.y() += V[index_list[i]].y();
+            mean_point.z() += V[index_list[i]].z();
+            if (has_color) {
+                mean_color.x() += C[index_list[i]].r;
+                mean_color.y() += C[index_list[i]].g;
+                mean_color.z() += C[index_list[i]].b;                
+            }
+        }
+        mean_point.x() /= index_list.size();
+        mean_point.y() /= index_list.size();
+        mean_point.z() /= index_list.size();
+        if (has_color) {
+            mean_color.x() /= index_list.size();
+            mean_color.y() /= index_list.size();
+            mean_color.z() /= index_list.size();
+        }
+        mean_density = std::min(1.0f, index_list.size()/d);
+
+        gc[key] = Cell {mean_point, Color{mean_color.x(), mean_color.y(), mean_color.z()}, mean_density};
+    }
+
+    return gc;
+}
+
+
 Mesh Mesh::grid_sample(uint32_t N)
 {
-    Mesh outmesh; // outmesh.N will be used for saving density ?
+    Mesh outmesh;
 
     AABB aabb(V);
     aabb.voxel(N);
     GridIndex gi = grid_index(aabb);
-
-    // float density_mean = 0.0f;
-    // float density_stdv = 0.0f;
+    GridCell gc = grid_cell(gi);
     bool has_color = (V.size() == C.size());
-    for (auto n : gi) {
-        const IndexList& index_list = n.second;
-        // density_mean += index_list.size();
-        // density_stdv += index_list.size() * index_list.size();
 
-        Eigen::Vector3f sum_point = Vector3f::Zero();
-        Eigen::Vector3f sum_color = Vector3f::Zero();
-        for (size_t i = 0; i < index_list.size(); i++) {
-            sum_point.x() += V[index_list[i]].x();
-            sum_point.y() += V[index_list[i]].y();
-            sum_point.z() += V[index_list[i]].z();
-            if (has_color) {
-                sum_color.x() += C[index_list[i]].r;
-                sum_color.y() += C[index_list[i]].g;
-                sum_color.z() += C[index_list[i]].b;
-            }
-        }
-        sum_point.x() /= index_list.size();
-        sum_point.y() /= index_list.size();
-        sum_point.z() /= index_list.size();
 
-        if (has_color) {
-            sum_color.x() /= index_list.size();
-            sum_color.y() /= index_list.size();
-            sum_color.z() /= index_list.size();
-        }
+    std::cout << "has_color --- " << has_color << " V/C.size(): " << V.size() << "/" << C.size() << std::endl;
 
-        outmesh.V.push_back(Point { sum_point.x(), sum_point.y(), sum_point.z() });
-        // outmesh.N.push_back(Normal{(float)index_list.size(), 0.0f, 0.0f});
-
-        if (has_color) {
-            outmesh.C.push_back(Color { sum_color.x(), sum_color.y(), sum_color.z() });
-        }
+    for (auto n:gc) {
+        const GridKey& key = n.first;
+        const Cell& cell = gc[key];
+        outmesh.V.push_back(cell.point);
+        if (has_color)
+            outmesh.C.push_back(cell.color);
     }
-    // if (gi.size() > 0) {
-    //     density_mean /= gi.size();
 
-    //     density_stdv /= gi.size();
-    //     density_stdv -= density_mean;
-    //     density_stdv = sqrtf(density_stdv);
+
+    // bool has_color = (V.size() == C.size());
+    // for (auto n : gi) {
+    //     const IndexList& index_list = n.second;
+
+    //     Eigen::Vector3f mean_point = Vector3f::Zero();
+    //     Eigen::Vector3f mean_color = Vector3f::Zero();
+    //     for (size_t i = 0; i < index_list.size(); i++) {
+    //         mean_point.x() += V[index_list[i]].x();
+    //         mean_point.y() += V[index_list[i]].y();
+    //         mean_point.z() += V[index_list[i]].z();
+    //         if (has_color) {
+    //             mean_color.x() += C[index_list[i]].r;
+    //             mean_color.y() += C[index_list[i]].g;
+    //             mean_color.z() += C[index_list[i]].b;
+    //         }
+    //     }
+    //     mean_point.x() /= index_list.size();
+    //     mean_point.y() /= index_list.size();
+    //     mean_point.z() /= index_list.size();
+    //     outmesh.V.push_back(Point { mean_point.x(), mean_point.y(), mean_point.z() });
+
+    //     if (has_color) {
+    //         mean_color.x() /= index_list.size();
+    //         mean_color.y() /= index_list.size();
+    //         mean_color.z() /= index_list.size();
+
+    //         outmesh.C.push_back(Color { mean_color.x(), mean_color.y(), mean_color.z() });
+    //     }
     // }
 
-    // for (auto n: outmesh.N) {
-    //     n.y() = density_mean;
-    //     n.z() = density_stdv;
-    // }
 
     return outmesh;
 }
 
 Mesh Mesh::grid_mesh(uint32_t N)
 {
-    Mesh new_mesh;
-    // GridIndex gi = grid_index(N);
-    // new_mesh = grid_mesh(gi);
+    // static uint32_t cube_offset[8*3] = {
+    //     0, 0, 0,
+    //     1, 0, 0,
+    //     1, 1, 0,
+    //     0, 1, 0,
+    //     0, 0, 1,
+    //     1, 0, 1,
+    //     1, 1, 1,
+    //     0, 1, 1
+    // };
 
-    // // Call MC to create F for new_mesh
-    // new_mesh.F.clear();
+    static uint32_t cube_offset[8*3] = {
+        0, 0, 0,
+        1, 0, 0,
+        1, 0, 1,
+        0, 0, 1,
+        0, 1, 0,
+        1, 1, 0,
+        1, 1, 1,
+        0, 1, 1
+    };
 
-    return new_mesh;
+    GridKey cube_keys[8];
+    float cube_points[8*3];
+    float cube_colors[8*3];
+    float cube_density[8];
+    int has_color = (V.size() == C.size())?1 : 0;
+
+    Mesh outmesh;
+    // uint32_t n_triangles = 0;
+
+    AABB aabb(V);
+    aabb.voxel(N);
+    GridIndex gi = grid_index(aabb);
+    GridCell gc = grid_cell(gi);
+
+    // auto emit_triangle = [&](int has_color, float v1[3], float v2[3], float v3[3], float c1[3], float c2[3], float c3[3])
+    // auto emit_triangle = [&](int has_color, float v1[], float v2[], float v3[], float c1[], float c2[], float c3[]) -> void {
+    //     Face new_face;
+
+    //     Point p1 {v1[0], v1[1], v1[2]};
+    //     Point p2 {v2[0], v2[1], v2[2]};
+    //     Point p3 {v3[0], v3[1], v3[2]};
+    //     outmesh.V.push_back(p1);
+    //     outmesh.V.push_back(p2);
+    //     outmesh.V.push_back(p3);
+
+    //     new_face = Face {n_triangles, n_triangles + 1, n_triangles + 2};
+    //     outmesh.F.push_back(new_face);
+
+    //     if (has_color) {
+    //         Color color1 {c1[0], c1[1], c1[2]};
+    //         Color color2 {c2[0], c2[1], c2[2]};
+    //         Color color3 {c3[0], c3[1], c3[2]};
+    //         outmesh.C.push_back(color1);
+    //         outmesh.C.push_back(color2);
+    //         outmesh.C.push_back(color3);
+    //     }
+
+    //     n_triangles += 3;
+    // };
+
+    // std::function<void(int has_color, float v1[], float v2[], float v3[], float c1[], float c2[], float c3[])> callback;
+    // callback = emit_triangle;
+
+    for (auto n : gc) {
+        const GridKey& key = n.first;
+
+        // std::cout << key << " -- " << gc[key].density << std::endl;
+        // continue;
+
+
+        for (int ii = 0; ii < 8; ii++) {
+            cube_keys[ii].i = key.i + cube_offset[3*ii + 0];
+            cube_keys[ii].j = key.j + cube_offset[3*ii + 1];
+            cube_keys[ii].k = key.k + cube_offset[3*ii + 2];
+
+            const GridKey &new_key = cube_keys[ii];
+
+            if (gc.find(new_key) == gc.end()) {
+                // std::cout << "CheckPoint 1 ... " << std::endl;
+                Point local = aabb.key_point(new_key);
+
+                cube_points[3*ii + 0] = local.x(); // 0.0f;
+                cube_points[3*ii + 1] = local.y(); // 0.0f;
+                cube_points[3*ii + 2] = local.z(); // 0.0f;
+
+                cube_colors[3*ii + 0] = 0.0f;
+                cube_colors[3*ii + 1] = 0.0f;
+                cube_colors[3*ii + 2] = 0.0f;
+
+                cube_density[ii] = 0.0;
+            } else {
+                // std::cout << "CheckPoint 2 ... " << std::endl;
+
+                const Cell& cell = gc[new_key];
+
+                cube_points[3*ii + 0] = cell.point.x();
+                cube_points[3*ii + 1] = cell.point.y();
+                cube_points[3*ii + 2] = cell.point.z();
+
+                cube_colors[3*ii + 0] = cell.color.r;
+                cube_colors[3*ii + 1] = cell.color.g;
+                cube_colors[3*ii + 2] = cell.color.b;
+
+                cube_density[ii] = cell.density;
+            }
+        }
+
+        outmesh.cube_mc(has_color, cube_points, cube_colors, cube_density, 0.01f /*borderval*/);
+    }
+
+    return outmesh;
 }
 
 struct IndexLabel {

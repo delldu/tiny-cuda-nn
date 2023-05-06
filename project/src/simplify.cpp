@@ -1,3 +1,11 @@
+/************************************************************************************
+***
+***     Copyright 2023 Dell Du(18588220928@163.com), All Rights Reserved.
+***
+***     File Author: Dell, 2023年 03月 07日 星期二 18:29:34 CST
+***
+************************************************************************************/
+
 #include "mesh.h"
 #include <queue>
 
@@ -33,7 +41,7 @@ struct EdgeCost {
     EdgeCost(Edge e, float c, Point p)
         : edge(e)
         , cost(c)
-        , pos(p)
+        , vpos(p)
     {
         ; // e.p1 --> best, e.p2 --> best
     }
@@ -45,13 +53,13 @@ struct EdgeCost {
 
     friend std::ostream& operator<<(std::ostream& os, const EdgeCost& ec)
     {
-        os << ec.edge << ", Point: (" << ec.pos.x() << ", " << ec.pos.y() << ", " << ec.pos.z() << "),  Cost: " << ec.cost;
+        os << ec.edge << ", Point: (" << ec.vpos.x() << ", " << ec.vpos.y() << ", " << ec.vpos.z() << "),  Cost: " << ec.cost;
         return os;
     }
 
     Edge edge;
     float cost;
-    Point pos; // example pos  = (v1 + v2)/2.0
+    Point vpos; // example vpos  = (v1 + v2)/2.0
 };
 
 void Mesh::simplify(float ratio)
@@ -336,7 +344,7 @@ void Mesh::simplify(float ratio)
             continue;
         }
 
-        remove_edge(ec.edge, ec.pos);
+        remove_edge(ec.edge, ec.vpos);
     }
 
     post_process();
