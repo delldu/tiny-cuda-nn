@@ -31,7 +31,8 @@ SOURCE := main.cpp \
 	../dependencies/stbi/stbi_wrapper.cpp \
 	src/points.cu \
 	src/mesh.cpp \
-	src/simplify.cpp
+	src/simplify.cpp \
+	src/segment.cpp
 
 APPLETS := $(shell ./makebox --source)
 SOURCE += $(APPLETS)

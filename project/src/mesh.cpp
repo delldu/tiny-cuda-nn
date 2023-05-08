@@ -52,51 +52,6 @@ public:
     std::vector<Normal> data;
 };
 
-struct PointCloud {
-    using coord_t = float; //!< The type of each point
-
-    // Must return the number of points
-    inline size_t kdtree_get_point_count() const { return data.size(); }
-
-    //  "if/else's" are actually solved at compile time.
-    inline float kdtree_get_pt(const size_t idx, const size_t dim) const
-    {
-        if (dim == 0)
-            return data[idx].x();
-        else if (dim == 1)
-            return data[idx].y();
-        else
-            return data[idx].z();
-    }
-
-    // Optional bounding-box computation: return false to default to a standard
-    // bbox computation loop.
-    //   Return true if the BBOX was already computed by the class and returned
-    //   in "bb" so it can be avoided to redo it again. Look at bb.size() to
-    //   find out the expected dimensionality (e.g. 2 or 3 for point clouds)
-    template <class BBOX>
-    bool kdtree_get_bbox(BBOX& /* bb */) const
-    {
-        return false;
-    }
-
-public:
-    std::vector<Point> data;
-};
-
-void test_plane()
-{
-    Mesh mesh;
-    mesh.load("/tmp/dragon.obj");
-    mesh.dump();
-    // mesh.simplify(0.1);
-    // mesh.save("/tmp/test1.obj");
-
-    // Mesh outmesh = mesh.grid_sample(256);
-    Mesh outmesh = mesh.grid_mesh(256);
-
-    outmesh.save("/tmp/test1.obj");
-}
 
 bool Mesh::loadOBJ(const char* filename)
 {
@@ -106,12 +61,14 @@ bool Mesh::loadOBJ(const char* filename)
 
     const char* basepath = NULL;
     bool triangulate = true;
+    bool default_vcols_fallback = false;
 
     reset();
     tlog::info() << "Loading " << filename << " ... ";
 
     std::string warn, err;
-    bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, basepath, triangulate);
+    bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, 
+        basepath, triangulate, default_vcols_fallback);
     if (!warn.empty()) {
         tlog::warning() << "WARN: " << warn;
     }
@@ -127,11 +84,11 @@ bool Mesh::loadOBJ(const char* filename)
     }
 
     for (size_t v = 0; v < attrib.vertices.size() / 3; v++) {
-        V.push_back(Point { attrib.vertices[3 * v + 0], attrib.vertices[3 * v + 1], attrib.vertices[3 * v + 2] });
+        V.push_back(Point { attrib.vertices[v*3 + 0], attrib.vertices[v*3 + 1], attrib.vertices[v*3 + 2] });
     }
 
     for (size_t v = 0; v < attrib.colors.size() / 3; v++) {
-        C.push_back(Color { attrib.colors[3 * v + 0], attrib.colors[3 * v + 1], attrib.colors[3 * v + 2] });
+        C.push_back(Color { attrib.colors[v*3 + 0], attrib.colors[v*3 + 1], attrib.colors[v*3 + 2] });
     }
 
     // for (size_t v = 0; v < attrib.normals.size() / 3; v++) {
@@ -150,16 +107,19 @@ bool Mesh::loadOBJ(const char* filename)
         // For each face
         for (size_t f = 0; f < shapes[i].mesh.num_face_vertices.size(); f++) {
             size_t fnum = shapes[i].mesh.num_face_vertices[f];
-            face.clear();
+            face.clear(); // new face
             for (size_t v = 0; v < fnum; v++) {
                 tinyobj::index_t idx = shapes[i].mesh.indices[index_offset + v];
                 face.push_back((uint32_t)idx.vertex_index);
+
                 // idx.vertex_index, idx.normal_index, idx.texcoord_index
             }
             F.push_back(face);
             index_offset += fnum;
         }
     }
+
+    tlog::info() << "Loading mesh vertext: " << V.size() << ", faces: " << F.size();
 
     return true;
 }
@@ -283,6 +243,8 @@ bool Mesh::loadPLY(const char* filename)
         return false;
     }
 
+    tlog::info() << "Loading mesh vertext: " << V.size() << ", faces: " << F.size();
+
     return true;
 }
 
@@ -361,12 +323,12 @@ void Mesh::clean(Mask mask)
     V = vertex;
 }
 
-GridIndex Mesh::grid_index(AABB aabb)
+GridIndex Mesh::grid_index(const AABB &aabb)
 {
     GridIndex gi;
 
     auto grid_logger = tlog::Logger("Grid index ...");
-    auto progress = grid_logger.progress(V.size());
+    auto progress = grid_logger.progress(V.size() + 1);
     for (size_t n = 0; n < V.size(); n++) {
         progress.update(n);
         GridKey key = aabb.grid_key(V[n]);
@@ -374,30 +336,18 @@ GridIndex Mesh::grid_index(AABB aabb)
     }
     grid_logger.success("OK !");
 
+    tlog::info() << "Point cloud index numbers: " << gi.size();
+
     return gi;
 }
 
-GridCell Mesh::grid_cell(const GridIndex& gi)
+GridNormal Mesh::grid_normal(GridIndex gi)
 {
-    GridCell gc;
-    float d, mean_density;
-    float mean = 0.0f;
-    float stdv = 0.0f;
+    GridNormal gn;
+    float mean_density;
+    GridKey new_key;
     bool has_color = (V.size() == C.size());
 
-    for (auto n : gi) {
-        const IndexList& index_list = n.second;
-        d = (float)index_list.size();
-        mean += d;
-        stdv += d * d;
-    }
-    if (gi.size() > 0) {
-        mean /= gi.size();
-        stdv /= gi.size();
-        stdv -= mean;
-        stdv = sqrtf(stdv);
-    }
-    d = mean + 2.0 * stdv + 1.0e-6; // 1/2/3 sigma: 68.27%, 95.45%, 99.73%
 
     for (auto n : gi) {
         const GridKey& key = n.first;
@@ -418,6 +368,7 @@ GridCell Mesh::grid_cell(const GridIndex& gi)
                 mean_color.z() += C[index_list[i]].b;                
             }
         }
+
         mean_point.x() /= index_list.size();
         mean_point.y() /= index_list.size();
         mean_point.z() /= index_list.size();
@@ -426,12 +377,32 @@ GridCell Mesh::grid_cell(const GridIndex& gi)
             mean_color.y() /= index_list.size();
             mean_color.z() /= index_list.size();
         }
-        mean_density = std::min(1.0f, index_list.size()/d);
 
-        gc[key] = Cell {mean_point, Color{mean_color.x(), mean_color.y(), mean_color.z()}, mean_density};
+        mean_density = index_list.size();
+        new_key.i = key.i - 1; new_key.j = key.j + 0; new_key.k = key.k + 0;
+        if (gi.find(new_key) != gi.end())
+            mean_density += gi[key].size();
+        new_key.i = key.i + 1; new_key.j = key.j + 0; new_key.k = key.k + 0;
+        if (gi.find(new_key) != gi.end())
+            mean_density += (float)gi[new_key].size();
+        new_key.i = key.i + 0; new_key.j = key.j - 1; new_key.k = key.k + 0;
+        if (gi.find(new_key) != gi.end())
+            mean_density += (float)gi[new_key].size();
+        new_key.i = key.i + 0; new_key.j = key.j + 1; new_key.k = key.k + 0;
+        if (gi.find(new_key) != gi.end())
+            mean_density += (float)gi[new_key].size();
+        new_key.i = key.i + 0; new_key.j = key.j + 0; new_key.k = key.k - 1;
+        if (gi.find(new_key) != gi.end())
+            mean_density += (float)gi[new_key].size();
+        new_key.i = key.i + 0; new_key.j = key.j + 0; new_key.k = key.k + 1;
+        if (gi.find(new_key) != gi.end())
+            mean_density += (float)gi[new_key].size();
+        mean_density /= 7.0;
+
+        gn[key] = GridCell {mean_point, Color{mean_color.x(), mean_color.y(), mean_color.z()}, mean_density};
     }
 
-    return gc;
+    return gn;
 }
 
 
@@ -442,80 +413,34 @@ Mesh Mesh::grid_sample(uint32_t N)
     AABB aabb(V);
     aabb.voxel(N);
     GridIndex gi = grid_index(aabb);
-    GridCell gc = grid_cell(gi);
+    GridNormal gn = grid_normal(gi);
     bool has_color = (V.size() == C.size());
 
-
-    std::cout << "has_color --- " << has_color << " V/C.size(): " << V.size() << "/" << C.size() << std::endl;
-
-    for (auto n:gc) {
+    for (auto n:gn) {
         const GridKey& key = n.first;
-        const Cell& cell = gc[key];
+        const GridCell& cell = gn[key];
         outmesh.V.push_back(cell.point);
         if (has_color)
             outmesh.C.push_back(cell.color);
     }
-
-
-    // bool has_color = (V.size() == C.size());
-    // for (auto n : gi) {
-    //     const IndexList& index_list = n.second;
-
-    //     Eigen::Vector3f mean_point = Vector3f::Zero();
-    //     Eigen::Vector3f mean_color = Vector3f::Zero();
-    //     for (size_t i = 0; i < index_list.size(); i++) {
-    //         mean_point.x() += V[index_list[i]].x();
-    //         mean_point.y() += V[index_list[i]].y();
-    //         mean_point.z() += V[index_list[i]].z();
-    //         if (has_color) {
-    //             mean_color.x() += C[index_list[i]].r;
-    //             mean_color.y() += C[index_list[i]].g;
-    //             mean_color.z() += C[index_list[i]].b;
-    //         }
-    //     }
-    //     mean_point.x() /= index_list.size();
-    //     mean_point.y() /= index_list.size();
-    //     mean_point.z() /= index_list.size();
-    //     outmesh.V.push_back(Point { mean_point.x(), mean_point.y(), mean_point.z() });
-
-    //     if (has_color) {
-    //         mean_color.x() /= index_list.size();
-    //         mean_color.y() /= index_list.size();
-    //         mean_color.z() /= index_list.size();
-
-    //         outmesh.C.push_back(Color { mean_color.x(), mean_color.y(), mean_color.z() });
-    //     }
-    // }
-
 
     return outmesh;
 }
 
 Mesh Mesh::grid_mesh(uint32_t N)
 {
-    // static uint32_t cube_offset[8*3] = {
-    //     0, 0, 0,
-    //     1, 0, 0,
-    //     1, 1, 0,
-    //     0, 1, 0,
-    //     0, 0, 1,
-    //     1, 0, 1,
-    //     1, 1, 1,
-    //     0, 1, 1
-    // };
-
     static uint32_t cube_offset[8*3] = {
         0, 0, 0,
         1, 0, 0,
-        1, 0, 1,
-        0, 0, 1,
-        0, 1, 0,
         1, 1, 0,
+        0, 1, 0,
+        0, 0, 1,
+        1, 0, 1,
         1, 1, 1,
         0, 1, 1
     };
 
-    GridKey cube_keys[8];
+
     float cube_points[8*3];
     float cube_colors[8*3];
     float cube_density[8];
@@ -527,258 +452,76 @@ Mesh Mesh::grid_mesh(uint32_t N)
     AABB aabb(V);
     aabb.voxel(N);
     GridIndex gi = grid_index(aabb);
-    GridCell gc = grid_cell(gi);
+    GridNormal gn = grid_normal(gi);
 
-    // auto emit_triangle = [&](int has_color, float v1[3], float v2[3], float v3[3], float c1[3], float c2[3], float c3[3])
-    // auto emit_triangle = [&](int has_color, float v1[], float v2[], float v3[], float c1[], float c2[], float c3[]) -> void {
-    //     Face new_face;
+    // for (auto n : gn) {
 
-    //     Point p1 {v1[0], v1[1], v1[2]};
-    //     Point p2 {v2[0], v2[1], v2[2]};
-    //     Point p3 {v3[0], v3[1], v3[2]};
-    //     outmesh.V.push_back(p1);
-    //     outmesh.V.push_back(p2);
-    //     outmesh.V.push_back(p3);
+    for (uint32_t i = 0; i < aabb.dim.x(); i++)  {
+        for (uint32_t j = 0; j < aabb.dim.y(); j++) {
+            for (uint32_t k = 0; k < aabb.dim.z(); k++) {
 
-    //     new_face = Face {n_triangles, n_triangles + 1, n_triangles + 2};
-    //     outmesh.F.push_back(new_face);
+                GridKey key {i, j, k};
+                // if (gn.find(key) == gn.end())
+                //     continue;
 
-    //     if (has_color) {
-    //         Color color1 {c1[0], c1[1], c1[2]};
-    //         Color color2 {c2[0], c2[1], c2[2]};
-    //         Color color3 {c3[0], c3[1], c3[2]};
-    //         outmesh.C.push_back(color1);
-    //         outmesh.C.push_back(color2);
-    //         outmesh.C.push_back(color3);
-    //     }
 
-    //     n_triangles += 3;
-    // };
+        // const GridKey& key = n.first;
 
-    // std::function<void(int has_color, float v1[], float v2[], float v3[], float c1[], float c2[], float c3[])> callback;
-    // callback = emit_triangle;
-
-    for (auto n : gc) {
-        const GridKey& key = n.first;
-
-        // std::cout << key << " -- " << gc[key].density << std::endl;
+        // std::cout << key << " -- " << gn[key].density << std::endl;
         // continue;
 
-
+        bool skip = true;
         for (int ii = 0; ii < 8; ii++) {
-            cube_keys[ii].i = key.i + cube_offset[3*ii + 0];
-            cube_keys[ii].j = key.j + cube_offset[3*ii + 1];
-            cube_keys[ii].k = key.k + cube_offset[3*ii + 2];
+            GridKey new_key { i + cube_offset[ii*3 + 0], j + cube_offset[ii*3 + 1], k + cube_offset[ii*3 + 2] };
 
-            const GridKey &new_key = cube_keys[ii];
-
-            if (gc.find(new_key) == gc.end()) {
-                // std::cout << "CheckPoint 1 ... " << std::endl;
+            if (gn.find(new_key) == gn.end()) {
                 Point local = aabb.key_point(new_key);
 
-                cube_points[3*ii + 0] = local.x(); // 0.0f;
-                cube_points[3*ii + 1] = local.y(); // 0.0f;
-                cube_points[3*ii + 2] = local.z(); // 0.0f;
+                cube_points[ii*3 + 0] = local.x(); // 0.0f;
+                cube_points[ii*3 + 1] = local.y(); // 0.0f;
+                cube_points[ii*3 + 2] = local.z(); // 0.0f;
 
-                cube_colors[3*ii + 0] = 0.0f;
-                cube_colors[3*ii + 1] = 0.0f;
-                cube_colors[3*ii + 2] = 0.0f;
+                cube_colors[ii*3 + 0] = 0.0f;
+                cube_colors[ii*3 + 1] = 0.0f;
+                cube_colors[ii*3 + 2] = 0.0f;
 
                 cube_density[ii] = 0.0;
             } else {
-                // std::cout << "CheckPoint 2 ... " << std::endl;
+                skip = false;
+                const GridCell& cell = gn[new_key];
 
-                const Cell& cell = gc[new_key];
+                cube_points[ii*3 + 0] = cell.point.x();
+                cube_points[ii*3 + 1] = cell.point.y();
+                cube_points[ii*3 + 2] = cell.point.z();
 
-                cube_points[3*ii + 0] = cell.point.x();
-                cube_points[3*ii + 1] = cell.point.y();
-                cube_points[3*ii + 2] = cell.point.z();
-
-                cube_colors[3*ii + 0] = cell.color.r;
-                cube_colors[3*ii + 1] = cell.color.g;
-                cube_colors[3*ii + 2] = cell.color.b;
+                cube_colors[ii*3 + 0] = cell.color.r;
+                cube_colors[ii*3 + 1] = cell.color.g;
+                cube_colors[ii*3 + 2] = cell.color.b;
 
                 cube_density[ii] = cell.density;
             }
         }
 
-        outmesh.cube_mc(has_color, cube_points, cube_colors, cube_density, 0.01f /*borderval*/);
+        // if (! skip)
+        outmesh.cube_mc(has_color, cube_points, cube_colors, cube_density, 2.0/7.0 /*borderval*/);
+
+            }
+        }
+
     }
+    // }
 
     return outmesh;
 }
 
-struct IndexLabel {
-    size_t index;
-    int label;
-};
 
-bool IndexLabelSort(const IndexLabel& p0, const IndexLabel& p1)
-{
-    return p0.label < p1.label;
-}
-
-MeshList Mesh::fast_segment(uint32_t N, size_t outliers_threshold)
-{
-    AABB aabb(V);
-    aabb.voxel(N);
-    float d_threshold = aabb.step;
-
-    PointCloud pc;
-    for (Point point : V)
-        pc.data.push_back(point);
-
-    float query_point[3];
-    using pc_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<
-        nanoflann::L2_Simple_Adaptor<float, PointCloud>,
-        PointCloud, 3 /* dim */>;
-    pc_kd_tree_t index(3 /*dim*/, pc, { 10 /* max leaf */ });
-
-    float squaredRadius = d_threshold * d_threshold;
-    std::vector<nanoflann::ResultItem<size_t, float>> ret_indices;
-    nanoflann::RadiusResultSet<float, size_t> resultSet(squaredRadius, ret_indices);
-
-    int tag_num = 1, temp_tag_num = -1;
-    std::vector<int> labels(V.size(), 0);
-
-    auto label_logger = tlog::Logger("Segment label ...");
-    auto progress = label_logger.progress(V.size());
-    for (size_t i = 0; i < V.size(); i++) {
-        progress.update(i);
-
-        if (labels[i] != 0)
-            continue;
-
-        // do radius search ...
-        query_point[0] = V[i].x();
-        query_point[1] = V[i].y();
-        query_point[2] = V[i].z();
-
-        resultSet.clear();
-        index.findNeighbors(resultSet, query_point); // nanoflann::SearchParams(10)
-
-        int min_tag_num = tag_num;
-        for (size_t k = 0; k < resultSet.size(); k++) {
-            size_t j = ret_indices[k].first; // V[j] is points ...
-            // find the minimum label and tag it to this cluster label.
-            if (labels[j] > 0 && labels[j] < min_tag_num)
-                min_tag_num = labels[j];
-        }
-
-        for (size_t k = 0; k < resultSet.size(); k++) {
-            size_t j = ret_indices[k].first; // V[j] is points ...
-            temp_tag_num = labels[j];
-            if (temp_tag_num > min_tag_num) {
-                for (size_t old = 0; old < V.size(); old++) {
-                    if (labels[old] == temp_tag_num)
-                        labels[old] = min_tag_num;
-                }
-            }
-            labels[j] = min_tag_num;
-        }
-        tag_num++;
-    }
-    label_logger.success("OK !");
-
-    auto cluster_logger = tlog::Logger("Segment cluster ...");
-    progress = cluster_logger.progress(V.size());
-
-    // Sort index_label_map
-    std::vector<IndexLabel> index_label_map;
-    index_label_map.resize(V.size());
-    IndexLabel temp_index_label;
-    for (size_t i = 0; i < V.size(); i++) {
-        temp_index_label.index = i;
-        temp_index_label.label = labels[i];
-        index_label_map[i] = temp_index_label;
-    }
-    sort(index_label_map.begin(), index_label_map.end(), IndexLabelSort);
-
-    MeshList cluster;
-    bool has_color = (V.size() == C.size());
-    size_t i, start_index = 0;
-    for (i = 0; i < index_label_map.size(); i++) {
-        progress.update(i);
-        // new cluster ?
-        if (index_label_map[i].label != index_label_map[start_index].label) {
-            // save previous mesh ?
-            if (i - start_index >= outliers_threshold) {
-                Mesh tmesh;
-                for (size_t j = start_index; j < i; j++) {
-                    tmesh.V.push_back(V[index_label_map[j].index]);
-                    if (has_color)
-                        tmesh.C.push_back(C[index_label_map[j].index]);
-                }
-                cluster.push_back(tmesh);
-            }
-            start_index = i;
-        }
-    }
-
-    // last cluster ?
-    if ((i - start_index) >= outliers_threshold) {
-        Mesh tmesh;
-        for (size_t j = start_index; j < i; j++) {
-            tmesh.V.push_back(V[index_label_map[j].index]);
-            if (has_color)
-                tmesh.C.push_back(C[index_label_map[j].index]);
-        }
-        cluster.push_back(tmesh);
-    }
-    cluster_logger.success("OK !");
-
-    std::cout << "fast_segment has color ?" << has_color << std::endl;
-
-    return cluster;
-}
-
-void Mesh::merge(MeshList cluster)
-{
-    static Color fake_colors[8] = {
-        Color { 120 / 255.0f, 120 / 255.0f, 120 / 255.0f },
-        Color { 180 / 255.0f, 120 / 255.0f, 120 / 255.0f },
-        Color { 6 / 255.0f, 230 / 255.0f, 230 / 255.0f },
-        Color { 80 / 255.0f, 50, 50 / 255.0f },
-        Color { 4 / 255.0f, 200 / 255.0f, 3 / 255.0f },
-        Color { 120 / 255.0f, 120 / 255.0f, 80 / 255.0f },
-        Color { 140 / 255.0f, 140 / 255.0f, 140 / 255.0f },
-        Color { 204 / 255.0f, 5 / 255.0f, 255 / 255.0f },
-    };
-
-    int count = 0;
-    size_t offset = V.size();
-
-    auto merge_logger = tlog::Logger("Merge ...");
-    auto progress = merge_logger.progress(cluster.size());
-    for (Mesh m : cluster) {
-        progress.update(count + 1);
-
-        for (Point p : m.V)
-            V.push_back(p);
-
-        for (Face f : m.F) {
-            Face new_face;
-            for (size_t fi : f)
-                new_face.push_back(fi + offset);
-            F.push_back(new_face);
-        }
-        Color fake_color = fake_colors[count % 8];
-        for (size_t i = 0; i < m.V.size(); i++)
-            C.push_back(fake_color);
-
-        count++;
-        offset += m.V.size();
-    }
-
-    merge_logger.success("OK !");
-}
 
 void Mesh::snap(float e, float t)
 {
     std::vector<Plane> planes;
 
     auto snap_logger = tlog::Logger("Create planes from face ...");
-    auto progress = snap_logger.progress(F.size());
+    auto progress = snap_logger.progress(F.size() + 1);
     for (Face f : F) {
         progress.update(planes.size());
         if (f.size() >= 3) {
@@ -824,7 +567,7 @@ void Mesh::snap(float e, float t)
     resultSet.init(ret_index, out_dist_sqr);
 
     snap_logger = tlog::Logger("Create support planes ...");
-    progress = snap_logger.progress(planes.size());
+    progress = snap_logger.progress(planes.size() + 1);
 
     std::vector<bool> need_check_planes(planes.size(), true);
     for (size_t i = 0; i < planes.size(); i++) {
@@ -857,7 +600,7 @@ void Mesh::snap(float e, float t)
     snap_logger.success("OK !");
 
     snap_logger = tlog::Logger("Refine support planes ...");
-    progress = snap_logger.progress(planes.size());
+    progress = snap_logger.progress(planes.size() + 1);
     std::vector<Plane> support_planes;
     for (size_t i = 0; i < planes.size(); i++) {
         progress.update(i);
@@ -872,7 +615,7 @@ void Mesh::snap(float e, float t)
     tlog::info() << "Support planes: " << support_planes.size();
 
     snap_logger = tlog::Logger("Snap points ...");
-    progress = snap_logger.progress(support_planes.size());
+    progress = snap_logger.progress(support_planes.size() + 1);
     for (size_t i = 0; i < support_planes.size(); i++) {
         progress.update(i);
         Plane plane = support_planes[i];
@@ -888,4 +631,35 @@ void Mesh::snap(float e, float t)
     snap_logger.success("OK !");
 
     support_planes.clear();
+}
+
+
+extern void test_segment();
+
+void test_mesh()
+{
+    Mesh mesh;
+    mesh.load("/tmp/dragon.obj");
+
+    Mesh outmesh;
+    outmesh = mesh.grid_mesh(256);
+    outmesh.save("/tmp/mesh.obj");
+}
+
+
+void test_plane()
+{
+    // Mesh mesh;
+    // mesh.load("/tmp/dragon.obj");
+    // mesh.dump();
+    // // mesh.simplify(0.1);
+    // // mesh.save("/tmp/test1.obj");
+
+    // // Mesh outmesh = mesh.grid_sample(256);
+    // Mesh outmesh = mesh.grid_mesh(512);
+
+    // outmesh.save("/tmp/test1.obj");
+
+    test_mesh();
+    // test_segment();
 }

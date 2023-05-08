@@ -29,7 +29,7 @@ struct Mesh;
 struct GridKey;
 struct HashFunc;
 struct EqualKey;
-struct Cell;
+struct GridCell;
 
 using Point = Eigen::Vector3f;
 using Points = std::vector<Point>;
@@ -46,7 +46,7 @@ using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
 // using GridPoint = std::unordered_map<GridKey, Point, HashFunc, EqualKey>;
 // using GridColor = std::unordered_map<GridKey, Color, HashFunc, EqualKey>;
 // using GridDensity = std::unordered_map<GridKey, float, HashFunc, EqualKey>;
-using GridCell = std::unordered_map<GridKey, Cell, HashFunc, EqualKey>;
+using GridNormal = std::unordered_map<GridKey, GridCell, HashFunc, EqualKey>;
 
 
 struct Plane {
@@ -70,13 +70,13 @@ struct Plane {
         return fabs(n.dot(p - o)) < e; // (p - o) _|_ n
     }
 
-    Point project(const Point p)
+    Point project(const Point p) const
     {
         float t = n.dot(p - o);
         return p - t * n;
     }
 
-    float distance(const Point p)
+    float distance(const Point p) const
     {
         return fabs(n.dot(p - o));
     }
@@ -147,10 +147,10 @@ public:
 };
 
 
-struct Cell {
-    Cell() {}
+struct GridCell {
+    GridCell() {}
 
-    Cell(Point p, Color c, float d): point(p), color(c), density(d) {
+    GridCell(Point p, Color c, float d): point(p), color(c), density(d) {
     }
 
 public:
@@ -167,6 +167,18 @@ struct GridKey {
         , j(s)
         , k(t)
     {
+    }
+
+    bool operator==(const GridKey& b) {
+        return i == b.i && j == b.j && k == b.k;
+    }
+
+    bool operator < (const GridKey & b) const {
+        if (i != b.i)
+            return i < b.i;
+        if (j != b.j)
+            return j < b.j;
+        return k < b.k;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const GridKey& key)
@@ -219,7 +231,7 @@ struct AABB {
         max += Point::Constant(amount);
     }
 
-    Point diag() { return max - min; }
+    Point diag() const { return max - min; }
 
     void voxel(uint32_t N)
     {
@@ -230,20 +242,21 @@ struct AABB {
         dim.z() = (int)ceilf(f.z());
     }
 
-    Point relative_pos(const Point& point) { return (point - min).cwiseQuotient(diag()); }
+    Point relative_pos(const Point& point) const { return (point - min).cwiseQuotient(diag()); }
 
-    GridKey grid_key(const Point& point)
+    GridKey grid_key(const Point& point) const
     {
-        Point pos = (point - min) / step;
+        Point pos = (point - min) / step; //  + Eigen::Vector3f {0.5f, 0.5f, 0.5f};
         return GridKey { (uint32_t)pos.x(), (uint32_t)pos.y(), (uint32_t)pos.z() };
     }
 
-    Point key_point(GridKey key) { return Point{min.x() + key.i * step, min.y() + key.j * step, min.z() + key.k*step}; }
+    Point key_point(GridKey key) const {
+        return Point{min.x() + key.i * step, min.y() + key.j * step, min.z() + key.k*step};
+    }
 
+    Point center() const { return 0.5f * (max + min); }
 
-    Point center() { return 0.5f * (max + min); }
-
-    AABB intersection(const AABB& other)
+    AABB intersection(const AABB& other) const
     {
         AABB result = *this;
         result.min = result.min.cwiseMax(other.min);
@@ -255,7 +268,7 @@ struct AABB {
 
     bool is_empty() const { return (max.array() < min.array()).any(); }
 
-    bool contains(const Point& p)
+    bool contains(const Point& p) const
     {
         return p.x() >= min.x() && p.x() <= max.x() && p.y() >= min.y() && p.y() <= max.y()
             && p.z() >= min.z() && p.z() <= max.z();
@@ -324,22 +337,25 @@ struct Mesh {
     void clean(Mask mask);
 
     Mesh grid_sample(uint32_t N);
-    MeshList fast_segment(uint32_t N, size_t outliers_threshold);
+
+    MeshList segment(uint32_t N, size_t outliers_threshold);
     void merge(MeshList cluster);
 
     Mesh grid_mesh(uint32_t N);
     void simplify(float ratio); // quadratic error metrics (QEM) ?
 
+    GridIndex grid_index(const AABB &aabb);
+    // GridNormal grid_normal(const GridIndex &gi);
+    GridNormal grid_normal(GridIndex gi);
+
 private:
-    GridIndex grid_index(AABB aabb);
-    GridCell grid_cell(const GridIndex &gi);
     // GridColor grid_color(const GridIndex &gi);
     // GridDensity grid_density(const GridIndex &gi);
 
     void emit_triangle(int has_color, float v1[], float v2[], float v3[], float c1[], float c2[], float c3[])
     {
         static uint32_t n_triangles = 0;
-        std::cout << "---- n_triangles ---" << n_triangles << std::endl;
+        // std::cout << "---- n_triangles ---" << n_triangles << std::endl;
 
         Face new_face;
 

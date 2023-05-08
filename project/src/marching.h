@@ -378,7 +378,6 @@ int Mesh::cube_mc(int has_color, float cell_point[], float cell_color[], float c
 
     /* Cube is entirely in/out of the surface */
     if (edgeTable[cubeindex] == 0) {
-        std::cout << "CheckPoint 1 ... " << std::endl;
         return 0;
     }
 
@@ -438,12 +437,11 @@ int Mesh::cube_mc(int has_color, float cell_point[], float cell_color[], float c
     /* Create the triangle */
     ntriang = 0;
     for (i = 0; triTable[cubeindex][i] != -1; i += 3) {
-        std::cout << "CheckPoint 2 ... " << std::endl;
-
         emit_triangle(has_color,
         	point_list[triTable[cubeindex][i + 0]], 
         	point_list[triTable[cubeindex][i + 1]], 
         	point_list[triTable[cubeindex][i + 2]],
+            
         	color_list[triTable[cubeindex][i + 0]], 
         	color_list[triTable[cubeindex][i + 1]], 
         	color_list[triTable[cubeindex][i + 2]]
