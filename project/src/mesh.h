@@ -8,6 +8,7 @@
 #pragma once
 
 #include <algorithm>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -47,7 +48,6 @@ using GridIndex = std::unordered_map<GridKey, IndexList, HashFunc, EqualKey>;
 // using GridColor = std::unordered_map<GridKey, Color, HashFunc, EqualKey>;
 // using GridDensity = std::unordered_map<GridKey, float, HashFunc, EqualKey>;
 using GridNormal = std::unordered_map<GridKey, GridCell, HashFunc, EqualKey>;
-
 
 struct Plane {
     Plane(Point o, Normal n)
@@ -130,10 +130,15 @@ public:
 };
 
 struct Color {
-    Color() {
+    Color()
+    {
     }
 
-    Color(float r, float g, float b):r(r), g(g), b(b) {
+    Color(float r, float g, float b)
+        : r(r)
+        , g(g)
+        , b(b)
+    {
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Color& color)
@@ -146,11 +151,14 @@ public:
     float r, g, b;
 };
 
-
 struct GridCell {
-    GridCell() {}
+    GridCell() { }
 
-    GridCell(Point p, Color c, float d): point(p), color(c), density(d) {
+    GridCell(Point p, Color c, float d)
+        : point(p)
+        , color(c)
+        , density(d)
+    {
     }
 
 public:
@@ -160,8 +168,8 @@ public:
 };
 
 struct GridKey {
-    GridKey() {}
-    
+    GridKey() { }
+
     GridKey(uint32_t f, uint32_t s, uint32_t t)
         : i(f)
         , j(s)
@@ -169,11 +177,13 @@ struct GridKey {
     {
     }
 
-    bool operator==(const GridKey& b) {
+    bool operator==(const GridKey& b)
+    {
         return i == b.i && j == b.j && k == b.k;
     }
 
-    bool operator < (const GridKey & b) const {
+    bool operator<(const GridKey& b) const
+    {
         if (i != b.i)
             return i < b.i;
         if (j != b.j)
@@ -185,6 +195,20 @@ struct GridKey {
     {
         os << std::fixed << "(" << key.i << ", " << key.j << ", " << key.k << ")";
         return os;
+    }
+
+    std::set<GridKey> nb3x3x3()
+    {
+        std::set<GridKey> s;
+        for (int ii = -1; ii <= 1; ii++) {
+            for (int jj = -1; jj <= 1; jj++) {
+                for (int kk = -1; kk <= 1; kk++) {
+                    if (!(ii == 0 && jj == 0 && kk == 0)) // skip self
+                        s.insert(GridKey { i + ii, j + jj, k + kk });
+                }
+            }
+        }
+        return s;
     }
 
     uint32_t i, j, k;
@@ -250,8 +274,9 @@ struct AABB {
         return GridKey { (uint32_t)pos.x(), (uint32_t)pos.y(), (uint32_t)pos.z() };
     }
 
-    Point key_point(GridKey key) const {
-        return Point{min.x() + key.i * step, min.y() + key.j * step, min.z() + key.k*step};
+    Point key_point(GridKey key) const
+    {
+        return Point { min.x() + key.i * step, min.y() + key.j * step, min.z() + key.k * step };
     }
 
     Point center() const { return 0.5f * (max + min); }
@@ -290,7 +315,7 @@ struct AABB {
 
     // Helper
     float step = 1.0f;
-    Eigen::Matrix<uint32_t, 3, 1> dim {1, 1, 1};
+    Eigen::Matrix<uint32_t, 3, 1> dim { 1, 1, 1 };
 };
 
 struct Mesh {
@@ -344,7 +369,7 @@ struct Mesh {
     Mesh grid_mesh(uint32_t N);
     void simplify(float ratio); // quadratic error metrics (QEM) ?
 
-    GridIndex grid_index(const AABB &aabb);
+    GridIndex grid_index(const AABB& aabb);
     // GridNormal grid_normal(const GridIndex &gi);
     GridNormal grid_normal(GridIndex gi);
 
@@ -359,20 +384,20 @@ private:
 
         Face new_face;
 
-        Point p1 {v1[0], v1[1], v1[2]};
-        Point p2 {v2[0], v2[1], v2[2]};
-        Point p3 {v3[0], v3[1], v3[2]};
+        Point p1 { v1[0], v1[1], v1[2] };
+        Point p2 { v2[0], v2[1], v2[2] };
+        Point p3 { v3[0], v3[1], v3[2] };
         V.push_back(p1);
         V.push_back(p2);
         V.push_back(p3);
 
-        new_face = Face {n_triangles, n_triangles + 1, n_triangles + 2};
+        new_face = Face { n_triangles, n_triangles + 1, n_triangles + 2 };
         F.push_back(new_face);
 
         if (has_color) {
-            Color color1 {c1[0], c1[1], c1[2]};
-            Color color2 {c2[0], c2[1], c2[2]};
-            Color color3 {c3[0], c3[1], c3[2]};
+            Color color1 { c1[0], c1[1], c1[2] };
+            Color color2 { c2[0], c2[1], c2[2] };
+            Color color3 { c3[0], c3[1], c3[2] };
             C.push_back(color1);
             C.push_back(color2);
             C.push_back(color3);
@@ -391,6 +416,155 @@ public:
     Colors C;
     // Normals N;
     Faces F;
+};
+
+class BitCube {
+public:
+    BitCube(size_t nx, size_t ny, size_t nz)
+    {
+        resize(nx, ny, nz);
+
+        // init with zeros
+        std::fill_n(m_data.begin(), m_data.size(), 0);
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const BitCube& bc)
+    {
+        os << "[";
+        os << "dim=[" << bc.dim.x() << "," << bc.dim.y() << "," << bc.dim.z() << "], ";
+        os << "size=" << bc.size();
+        os << "]";
+        return os;
+    }
+
+    inline void xyz_pos(uint32_t x, uint32_t y, uint32_t z, size_t* pos)
+    {
+        *pos = x * dim.y() * dim.z() + y * dim.z() + z;
+    }
+
+    inline void pos_xyz(size_t pos, uint32_t* x, uint32_t* y, uint32_t* z)
+    {
+        *z = pos % dim.z();
+        pos /= dim.z();
+        *y = pos % dim.y();
+        pos /= dim.y();
+        *x = pos;
+    }
+
+    inline bool get_pos(size_t pos) const
+    {
+        if (pos >= size())
+            return false;
+
+        size_t byte_loc = pos / 8;
+        size_t offset = pos % 8;
+
+        return (m_data[byte_loc] >> offset) & 0x1;
+    }
+
+    inline void set_pos(size_t pos, bool value = true)
+    {
+        if (pos >= size())
+            return;
+
+        size_t byte_loc = pos / 8;
+        uint8_t offset = pos % 8;
+        uint8_t bitfield = uint8_t(1 << offset);
+
+        if (value) {
+            m_data[byte_loc] |= bitfield;
+        } else {
+            m_data[byte_loc] &= (~bitfield);
+        }
+    }
+
+    void resize(size_t nx, size_t ny, size_t nz)
+    {
+        dim.x() = nx;
+        dim.y() = ny;
+        dim.z() = nz;
+        size_t nbits = nx * ny * nz;
+        size_t num_bytes = (nbits < 8) ? 1 : 1 + (nbits - 1) / 8;
+
+        m_data.resize(num_bytes);
+    }
+
+    size_t count() const
+    {
+        size_t c = 0;
+        for (size_t pos = 0; pos < size(); pos++)
+            c += get_pos(pos) ? 1 : 0;
+
+        return c;
+    }
+
+    bool empty() const
+    {
+        for (size_t i = 0; i < m_data.size(); i++) {
+            if (m_data[i] != 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    void clear()
+    {
+        std::fill_n(m_data.begin(), m_data.size(), 0);
+    }
+
+    void setall(bool value)
+    {
+        std::fill_n(m_data.begin(), m_data.size(), value ? 0xff : 0);
+    }
+
+    bool get(uint32_t x, uint32_t y, uint32_t z)
+    {
+        size_t pos;
+        xyz_pos(x, y, z, &pos);
+        return get_pos(pos);
+    }
+
+    // bool operator[](size_t pos) const
+    // {
+    //     return get_pos(pos);
+    // }
+
+    // bool operator()(const uint32_t x, const uint32_t y, const uint32_t z)
+    // {
+    //     return get(x, y, z);
+    // }
+
+    void set(uint32_t x, uint32_t y, uint32_t z, bool value)
+    {
+        size_t pos;
+        xyz_pos(x, y, z, &pos);
+        set_pos(pos, value);
+    }
+
+    size_t size() const
+    {
+        return dim.x() * dim.y() * dim.z();
+    }
+
+    std::vector<std::set<size_t>> segment();
+
+
+private:
+    std::vector<size_t> find_valid_nb3x3x3(size_t pos);
+
+    const uint8_t* data() const
+    {
+        return m_data.data();
+    }
+
+    uint8_t* data()
+    {
+        return m_data.data();
+    }
+
+    Eigen::Matrix<uint32_t, 3, 1> dim { 1, 1, 1 };
+    std::vector<uint8_t> m_data;
 };
 
 // struct Material {

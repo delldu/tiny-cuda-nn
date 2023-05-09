@@ -10,64 +10,43 @@
 
 MeshList Mesh::segment(uint32_t N, size_t outliers_threshold)
 {
+    size_t pos;
+    uint32_t x, y, z;
     MeshList cluster;
+
+    tlog::info() << "Point cloud segment ...";
 
     AABB aabb(V);
     aabb.voxel(N);
     bool has_color = (V.size() == C.size());
     GridIndex gi = grid_index(aabb);
-
-    tlog::info() << "Point cloud segment ...";
-
-    auto scan_keyset = [&](const IndexList& index_list, int start) {
-        std::set<GridKey> s;
-
-        for (size_t i = start; i < index_list.size(); i++) {
-            GridKey tkey = aabb.grid_key(V[index_list[i]]);
-            // neighbors keys -- total 27 (including tkey self)
-            for (int ii = -1; ii <= 1; ii++) {
-                for (int jj = -1; jj <= 1; jj++) {
-                    for (int kk = -1; kk <= 1; kk++) {
-                        s.insert(GridKey{tkey.i + ii, tkey.j + jj, tkey.k + kk});
-                    }
-                }
-            }
-        }
-        return s;
-    };
+    BitCube bc { aabb.dim.x(), aabb.dim.y(), aabb.dim.z() };
 
     for (auto n : gi) {
         const GridKey& key = n.first;
-        const IndexList &index_list = n.second;
-        if (index_list.empty())
-            continue;
-
-        size_t start = 0;
-        while (gi[key].size() != start) {
-            std::set<GridKey> keyset = scan_keyset(gi[key], start);
-            start = gi[key].size(); // set for next
-
-            for (GridKey new_key : keyset) {
-                if (new_key == key || gi.find(new_key) == gi.end() || gi[new_key].empty())
-                    continue;
-
-                // move gi[new_key] to gi[key]
-                gi[key].insert(gi[key].end(), gi[new_key].begin(), gi[new_key].end());
-                gi[new_key].clear();
-            }
-        }
+        bc.xyz_pos(key.i, key.j, key.k, &pos);
+        bc.set_pos(pos, true);
     }
-
-    for (auto n:gi) {
-        const IndexList &index_list = n.second;
-        if (index_list.size() < outliers_threshold + 1)
+    std::vector<std::set<size_t>> bc_cluster = bc.segment();
+    
+    for (size_t i = 0; i < bc_cluster.size(); i++) {
+        if (bc_cluster[i].size() < outliers_threshold)
             continue;
 
         Mesh tmesh;
-        for (size_t i = 0; i < index_list.size(); i++) {
-            tmesh.V.push_back(V[index_list[i]]);
-            if (has_color)
-                tmesh.C.push_back(C[index_list[i]]);
+        for (auto it = bc_cluster[i].begin(); it != bc_cluster[i].end(); it++) {
+            pos = *it;
+            bc.pos_xyz(pos, &x, &y, &z);
+            GridKey key = GridKey { x, y, z };
+            if (gi.find(key) == gi.end())
+                continue;
+
+            const IndexList& index_list = gi[key];
+            for (size_t j = 0; j < index_list.size(); j++) {
+                tmesh.V.push_back(V[index_list[j]]);
+                if (has_color)
+                    tmesh.C.push_back(C[index_list[j]]);
+            }
         }
         cluster.push_back(tmesh);
     }
@@ -75,7 +54,6 @@ MeshList Mesh::segment(uint32_t N, size_t outliers_threshold)
     tlog::info() << "Point cloud segment numbers: " << cluster.size();
     return cluster;
 }
-
 
 void Mesh::merge(MeshList cluster)
 {
@@ -122,7 +100,7 @@ void test_segment()
     mesh.dump();
 
     Mesh outmesh;
-    MeshList meshlist = mesh.segment(256, 100);
+    MeshList meshlist = mesh.segment(1024, 100);
     outmesh.merge(meshlist);
 
     outmesh.save("/tmp/segment.obj");

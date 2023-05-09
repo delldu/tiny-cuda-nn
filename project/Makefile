@@ -32,7 +32,8 @@ SOURCE := main.cpp \
 	src/points.cu \
 	src/mesh.cpp \
 	src/simplify.cpp \
-	src/segment.cpp
+	src/segment.cpp \
+	src/bitcube.cpp
 
 APPLETS := $(shell ./makebox --source)
 SOURCE += $(APPLETS)
